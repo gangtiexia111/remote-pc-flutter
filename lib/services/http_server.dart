@@ -6,6 +6,7 @@ import '../security/license_manager.dart';
 
 /// HTTP 控制服务 — 对应原 Java 版 DesktopHttpServer.java
 /// 子端运行，接收主端控制指令
+/// v1.0.1: 跨平台命令适配（Windows/macOS/Linux）
 class HttpServerService {
   static const int _defaultPort = 9998;
   HttpServer? _server;
