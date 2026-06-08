@@ -134,8 +134,8 @@ jobs:
       - name: 打包 Linux 产物
         run: |
           mkdir -p artifacts
-          cd build/linux/x64/release/bundle
-          zip -r ../../../../../artifacts/remote_pc_linux.zip .
+          ls -la build/linux/x64/release/bundle/
+          cd build/linux/x64/release/bundle && zip -r ../../../../../artifacts/remote_pc_linux.zip *
           echo "Linux build size: $(du -sh ../../../../../artifacts/remote_pc_linux.zip | cut -f1)"
 
       - name: 上传 Linux 产物
