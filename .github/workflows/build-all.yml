@@ -133,26 +133,21 @@ jobs:
 
       - name: 打包 Linux 产物
         run: |
-          mkdir -p artifacts
-          echo "=== 查找 Linux build 输出目录 ==="
-          find build -name "remote_pc" -type f 2>/dev/null || echo "no remote_pc binary found"
-          find build -type d -name "bundle" 2>/dev/null || echo "no bundle dir found"
-          echo "=== bundle 目录内容 ==="
+          echo "=== Linux bundle 目录内容 ==="
           BUNDLE_DIR=$(find build -type d -name "bundle" -path "*/linux/*" | head -1)
           if [ -n "$BUNDLE_DIR" ] && [ -d "$BUNDLE_DIR" ]; then
             echo "Found bundle at: $BUNDLE_DIR"
-            ls -la "$BUNDLE_DIR/"
-            zip -r artifacts/remote_pc_linux.zip -j "$BUNDLE_DIR"/*
+            ls -laR "$BUNDLE_DIR/" | head -30
+            echo "Total size: $(du -sh $BUNDLE_DIR | cut -f1)"
           else
             echo "ERROR: bundle directory not found!"
             find build -type d | head -30
             exit 1
           fi
-          echo "Linux build size: $(du -sh artifacts/remote_pc_linux.zip | cut -f1)"
 
       - name: 上传 Linux 产物
         uses: actions/upload-artifact@v4
         with:
           name: remote_pc_linux
-          path: artifacts/remote_pc_linux.zip
+          path: build/linux/x64/release/bundle/**
           retention-days: 30
