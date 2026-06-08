@@ -1,0 +1,132 @@
+name: Build All Platforms
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ============================================
+  # iOS 构建 (需要 macOS Runner)
+  # ============================================
+  build-ios:
+    name: iOS Build
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.8'
+          channel: 'stable'
+          cache: true
+
+      - name: 验证 Flutter 环境
+        run: |
+          flutter --version
+          flutter doctor --verbose
+
+      - name: 安装依赖
+        run: flutter pub get
+
+      - name: 构建 iOS (无签名)
+        run: |
+          flutter build ios --release --no-codesign
+
+      - name: 打包 iOS 产物
+        run: |
+          mkdir -p artifacts
+          cd build/ios/iphoneos
+          zip -r ../../../artifacts/remote_pc_ios.zip Runner.app
+          echo "iOS build size: $(du -sh ../../../artifacts/remote_pc_ios.zip | cut -f1)"
+
+      - name: 上传 iOS 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote_pc_ios
+          path: artifacts/remote_pc_ios.zip
+          retention-days: 30
+
+  # ============================================
+  # macOS 构建 (需要 macOS Runner)
+  # ============================================
+  build-macos:
+    name: macOS Build
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.8'
+          channel: 'stable'
+          cache: true
+
+      - name: 安装依赖
+        run: flutter pub get
+
+      - name: 构建 macOS
+        run: flutter build macos --release
+
+      - name: 打包 macOS 产物
+        run: |
+          mkdir -p artifacts
+          cd build/macos/Build/Products/Release
+          zip -r ../../../../../artifacts/remote_pc_macos.zip remote_pc.app
+          echo "macOS build size: $(du -sh ../../../../../artifacts/remote_pc_macos.zip | cut -f1)"
+
+      - name: 上传 macOS 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote_pc_macos
+          path: artifacts/remote_pc_macos.zip
+          retention-days: 30
+
+  # ============================================
+  # Linux 构建
+  # ============================================
+  build-linux:
+    name: Linux Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update -y -qq
+          sudo apt-get install -y -qq ninja-build libgtk-3-dev clang cmake pkg-config liblzma-dev
+
+      - name: 安装 Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.8'
+          channel: 'stable'
+          cache: true
+
+      - name: 安装依赖
+        run: flutter pub get
+
+      - name: 构建 Linux
+        run: flutter build linux --release
+
+      - name: 打包 Linux 产物
+        run: |
+          mkdir -p artifacts
+          cd build/linux/x64/release/bundle
+          zip -r ../../../../../artifacts/remote_pc_linux.zip .
+          echo "Linux build size: $(du -sh ../../../../../artifacts/remote_pc_linux.zip | cut -f1)"
+
+      - name: 上传 Linux 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote_pc_linux
+          path: artifacts/remote_pc_linux.zip
+          retention-days: 30
