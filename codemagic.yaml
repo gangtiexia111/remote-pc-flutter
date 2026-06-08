@@ -6,6 +6,12 @@ workflows:
     name: iOS Build
     instance_type: mac_mini_m2
     max_build_duration: 60
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: '*'
+      cancel_previous_builds: false
     environment:
       flutter: stable
       xcode: latest
@@ -28,6 +34,12 @@ workflows:
     name: macOS Build
     instance_type: mac_mini_m2
     max_build_duration: 60
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: '*'
+      cancel_previous_builds: false
     environment:
       flutter: stable
       xcode: latest
@@ -50,6 +62,12 @@ workflows:
     name: Linux Build
     instance_type: linux_x2
     max_build_duration: 60
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: '*'
+      cancel_previous_builds: false
     environment:
       flutter: stable
     scripts:
