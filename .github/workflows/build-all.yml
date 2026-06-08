@@ -111,6 +111,9 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: 启用 Linux 桌面支持
+        run: flutter config --enable-linux-desktop
+
       - name: 安装依赖
         run: flutter pub get
 
