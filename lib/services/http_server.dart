@@ -70,19 +70,43 @@ class HttpServerService {
   }
 
   void _handleShutdown(HttpRequest req) {
-    Process.start('shutdown', ['/s', '/t', '0']);
-    _respondOk(req, {'result': 'shutdown_initiated'});
+    final (cmd, args) = _shutdownCmd();
+    Process.start(cmd, args);
+    _respondOk(req, {'result': 'shutdown_initiated', 'platform': Platform.operatingSystem});
   }
 
   void _handleRestart(HttpRequest req) {
-    Process.start('shutdown', ['/r', '/t', '0']);
-    _respondOk(req, {'result': 'restart_initiated'});
+    final (cmd, args) = _restartCmd();
+    Process.start(cmd, args);
+    _respondOk(req, {'result': 'restart_initiated', 'platform': Platform.operatingSystem});
   }
 
   void _handleLockScreen(HttpRequest req) {
-    // Windows: rundll32 user32.dll,LockWorkStation
-    // macOS: pmset sleepnow 或 /System/Library/CoreServices/Menu\ Extras/User.menu/Contents/Resources/CGSession -suspend
-    _respondOk(req, {'result': 'lock_screen_initiated'});
+    final (cmd, args) = _lockScreenCmd();
+    Process.start(cmd, args);
+    _respondOk(req, {'result': 'lock_screen_initiated', 'platform': Platform.operatingSystem});
+  }
+
+  /// 返回对应平台的 (command, arguments)
+  (String, List<String>) _shutdownCmd() {
+    if (Platform.isWindows) return ('shutdown', ['/s', '/t', '0']);
+    if (Platform.isMacOS) return ('osascript', ['-e', 'tell app "System Events" to shut down']);
+    if (Platform.isLinux) return ('systemctl', ['poweroff']);
+    return ('shutdown', ['/s', '/t', '0']); // fallback
+  }
+
+  (String, List<String>) _restartCmd() {
+    if (Platform.isWindows) return ('shutdown', ['/r', '/t', '0']);
+    if (Platform.isMacOS) return ('osascript', ['-e', 'tell app "System Events" to restart']);
+    if (Platform.isLinux) return ('systemctl', ['reboot']);
+    return ('shutdown', ['/r', '/t', '0']); // fallback
+  }
+
+  (String, List<String>) _lockScreenCmd() {
+    if (Platform.isWindows) return ('rundll32', ['user32.dll,LockWorkStation']);
+    if (Platform.isMacOS) return ('pmset', ['displaysleepnow']);
+    if (Platform.isLinux) return ('loginctl', ['lock-session']);
+    return ('rundll32', ['user32.dll,LockWorkStation']); // fallback
   }
 
   void _handleHeartbeat(HttpRequest req) {
