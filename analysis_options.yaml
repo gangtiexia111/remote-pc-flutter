@@ -1,0 +1,26 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    - always_declare_return_types
+    - avoid_dynamic_calls
+    - avoid_print: false
+    - cancel_subscriptions
+    - constant_identifier_names
+    - prefer_const_constructors
+    - prefer_const_declarations
+    - prefer_final_locals
+    - use_key_in_widget_constructors
+    - avoid_empty_else
+    - avoid_unnecessary_containers
+    - sized_box_for_whitespace
+    - sort_child_properties_last
+    - use_build_context_synchronously
+
+analyzer:
+  errors:
+    missing_return: error
+    dead_code: warning
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"

@@ -1,0 +1,69 @@
+workflows:
+  # ============================================
+  # iOS 构建（无签名，生成 .app）
+  # ============================================
+  ios-build:
+    name: iOS Build
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+    scripts:
+      - name: Install dependencies
+        script: flutter pub get
+      - name: Build iOS (no code signing)
+        script: flutter build ios --release --no-codesign
+    artifacts:
+      - build/ios/iphoneos/Runner.app
+    publishing:
+      email:
+        recipients:
+          - build@remote-pc.local
+
+  # ============================================
+  # macOS 构建
+  # ============================================
+  macos-build:
+    name: macOS Build
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+    scripts:
+      - name: Install dependencies
+        script: flutter pub get
+      - name: Build macOS release
+        script: flutter build macos --release
+    artifacts:
+      - build/macos/Build/Products/Release/remote_pc.app
+    publishing:
+      email:
+        recipients:
+          - build@remote-pc.local
+
+  # ============================================
+  # Linux 构建
+  # ============================================
+  linux-build:
+    name: Linux Build
+    instance_type: linux_x2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+    scripts:
+      - name: Install system dependencies
+        script: |
+          sudo apt-get update -y
+          sudo apt-get install -y ninja-build libgtk-3-dev
+      - name: Install Dart dependencies
+        script: flutter pub get
+      - name: Build Linux release
+        script: flutter build linux --release
+    artifacts:
+      - build/linux/x64/release/bundle/
+    publishing:
+      email:
+        recipients:
+          - build@remote-pc.local
