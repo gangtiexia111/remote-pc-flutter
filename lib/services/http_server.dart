@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import '../models/device.dart';
 import '../security/license_manager.dart';
+// v1.0.2: Cross-platform command support (macOS/Linux)
 
 /// HTTP 控制服务 — 对应原 Java 版 DesktopHttpServer.java
 /// 子端运行，接收主端控制指令
