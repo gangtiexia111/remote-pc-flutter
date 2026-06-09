@@ -1,6 +1,7 @@
 workflows:
   # ============================================
   # iOS 构建（无签名，生成 .app）
+  # v1.0.3: 添加 Webhook 触发配置
   # ============================================
   ios-build:
     name: iOS Build
@@ -9,12 +10,18 @@ workflows:
     triggering:
       events:
         - push
+        - pull_request
       branch_patterns:
-        - pattern: '*'
-      cancel_previous_builds: false
+        - pattern: 'main'
+          include: true
+        - pattern: 'develop'
+          include: true
+      cancel_previous_builds: true
     environment:
       flutter: stable
       xcode: latest
+      vars:
+        SAFE_MODE: "1"
     scripts:
       - name: Install dependencies
         script: flutter pub get
@@ -25,10 +32,11 @@ workflows:
     publishing:
       email:
         recipients:
-          - build@remote-pc.local
+          - dev@remote-pc.app
 
   # ============================================
   # macOS 构建
+  # v1.0.3: 添加 Webhook 触发 + SAFE_MODE
   # ============================================
   macos-build:
     name: macOS Build
@@ -37,12 +45,18 @@ workflows:
     triggering:
       events:
         - push
+        - pull_request
       branch_patterns:
-        - pattern: '*'
-      cancel_previous_builds: false
+        - pattern: 'main'
+          include: true
+        - pattern: 'develop'
+          include: true
+      cancel_previous_builds: true
     environment:
       flutter: stable
       xcode: latest
+      vars:
+        SAFE_MODE: "1"
     scripts:
       - name: Install dependencies
         script: flutter pub get
@@ -53,10 +67,11 @@ workflows:
     publishing:
       email:
         recipients:
-          - build@remote-pc.local
+          - dev@remote-pc.app
 
   # ============================================
   # Linux 构建
+  # v1.0.3: 添加 Webhook 触发 + SAFE_MODE
   # ============================================
   linux-build:
     name: Linux Build
@@ -65,11 +80,17 @@ workflows:
     triggering:
       events:
         - push
+        - pull_request
       branch_patterns:
-        - pattern: '*'
-      cancel_previous_builds: false
+        - pattern: 'main'
+          include: true
+        - pattern: 'develop'
+          include: true
+      cancel_previous_builds: true
     environment:
       flutter: stable
+      vars:
+        SAFE_MODE: "1"
     scripts:
       - name: Install system dependencies
         script: |
@@ -84,4 +105,35 @@ workflows:
     publishing:
       email:
         recipients:
-          - build@remote-pc.local
+          - dev@remote-pc.app
+
+  # ============================================
+  # Android 构建（APK）
+  # v1.0.3: 新增 Android 构建流程
+  # ============================================
+  android-build:
+    name: Android Build
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: 'main'
+          include: true
+      cancel_previous_builds: true
+    environment:
+      flutter: stable
+      vars:
+        SAFE_MODE: "1"
+    scripts:
+      - name: Install dependencies
+        script: flutter pub get
+      - name: Build Android APK
+        script: flutter build apk --release
+    artifacts:
+      - build/**/outputs/**/*.apk
+    publishing:
+      email:
+        recipients:
+          - dev@remote-pc.app

@@ -1,7 +1,7 @@
 name: remote_pc
 description: Remote PC Control - Cross-platform remote control app
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.3+3
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -12,6 +12,7 @@ dependencies:
   
   # HTTP & 网络
   http: ^1.2.0
+  universal_io: ^2.2.2
   
   # 加密 & 安全
   cryptography: ^2.7.0
@@ -26,6 +27,10 @@ dependencies:
   
   # 权限
   permission_handler: ^11.3.0
+
+  # WebRTC 跨网络通信
+  flutter_webrtc: ^0.12.1
+  web_socket_channel: ^3.0.0
 
 dev_dependencies:
   flutter_test:

@@ -40,7 +40,7 @@ class LicenseManager {
   /// 生成设备唯一 ID（跨平台）
   Future<String> generateDeviceId() async {
     const storage = FlutterSecureStorage();
-    String? stored = await storage.read(key: _keyAlias);
+    final String? stored = await storage.read(key: _keyAlias);
     if (stored != null && stored.isNotEmpty) return stored;
     final rand = _secureRandomBytes(16);
     final id = 'REM-${base64Encode(rand).substring(0, 22).replaceAll('/', 'X').replaceAll('+', 'Y')}';

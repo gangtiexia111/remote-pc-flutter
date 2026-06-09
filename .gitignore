@@ -43,3 +43,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Signaling server (local dev only)
+signaling-server/node_modules/
+signaling-server/*.log
+
+# Build artifacts
+*.exe
+*.dll

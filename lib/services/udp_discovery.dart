@@ -54,7 +54,7 @@ class UdpDiscoveryService {
     final dg = _socket?.receive();
     if (dg == null) return;
     try {
-      final msg = jsonDecode(utf8.decode(dg.data));
+      final msg = jsonDecode(utf8.decode(dg.data)) as Map<String, dynamic>;
       if (msg['header'] != _magicHeader) return;
       final id = msg['id'] as String;
       if (_devices.containsKey(id)) {
@@ -67,7 +67,7 @@ class UdpDiscoveryService {
           port: msg['port'] as int,
         )..markAlive();
       }
-      for (final cb in _callbacks) cb(_devices[id]!);
+      for (final cb in _callbacks) { cb(_devices[id]!); }
     } catch (_) {}
   }
 

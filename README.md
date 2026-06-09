@@ -23,12 +23,14 @@ lib/
 │   └── dynamic_firewall.dart  # 动态多语言防火墙（防破解核心）
 ├── services/
 │   ├── udp_discovery.dart     # UDP 广播设备发现（端口 4567）
-│   ├── http_server.dart        # HTTP REST 控制服务（端口 9998）
+│   ├── http_server.dart        # HTTP REST 控制服务（端口 9998）+ SAFE_MODE
+│   ├── signaling_client.dart  # WebSocket 信令客户端（指数退避重连）
+│   ├── webrtc_connection_service.dart  # WebRTC 跨网络连接管理
 │   └── native_security_bridge.dart  # MethodChannel 原生安全桥接
 └── screens/
-    ├── home_screen.dart        # 主界面（设备列表 + 操作）
-    ├── security_screen.dart    # 安全监控面板
-    └── settings_screen.dart    # 设置页面（激活 + 主题）
+    ├── home_screen.dart        # 主界面（设备列表 + 双模式 + SAFE_MODE）
+    ├── security_screen.dart    # 安全监控面板（防火墙心跳 + 事件日志）
+    └── settings_screen.dart    # 设置页面（激活 + 主题 + SAFE_MODE 开关）
 ```
 
 ---
@@ -171,6 +173,9 @@ Headless 模式下，应用将：
 | `device_info_plus`        | 获取设备指纹                   |
 | `permission_handler`      | 权限管理                       |
 | `http`                    | HTTP 客户端                    |
+| `flutter_webrtc`          | WebRTC 跨网络通信             |
+| `web_socket_channel`      | WebSocket 信令通道            |
+| `universal_io`            | 跨平台 IO                     |
 
 > **注意**：`flutter_jailbreak_detection` 因兼容性问题已移除，越狱/Root 检测改为通过 MethodChannel 原生实现
 
@@ -183,9 +188,12 @@ Headless 模式下，应用将：
 - [x] 常量时间字符串比较（防时序攻击）
 - [x] 心跳校验 + 自毁机制
 - [x] 动态 AES 密钥（每次启动重新派生）
-- [ ] MethodChannel 原生层校验（待实现各平台原生代码）
-- [ ] 反调试检测（待实现）
-- [ ] 应用完整性校验（待实现）
+- [x] MethodChannel 原生层校验（Android Kotlin / Windows C++ / macOS Swift）
+- [x] 反调试检测（Android: isDebuggerConnected / Windows: IsDebuggerPresent + NtQueryInformationProcess / macOS: sysctl P_TRACED）
+- [x] 应用完整性校验（Android: APK 签名验证 + 模拟器检测 / macOS: codesign / Windows: DLL 完整性）
+- [x] SAFE_MODE 防护（环境变量 + 运行时切换 + HTTP 授权 Token）
+- [x] 危险指令二次确认对话框
+- [x] HTTP 控制服务审计日志
 - [ ] Obfuscation 构建验证（待构建完成后测试）
 
 ---
