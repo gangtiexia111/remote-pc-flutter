@@ -43,7 +43,8 @@ class LicenseManager {
     final String? stored = await storage.read(key: _keyAlias);
     if (stored != null && stored.isNotEmpty) return stored;
     final rand = _secureRandomBytes(16);
-    final id = 'REM-${base64Encode(rand).substring(0, 22).replaceAll('/', 'X').replaceAll('+', 'Y')}';
+    final id =
+        'REM-${base64Encode(rand).substring(0, 22).replaceAll('/', 'X').replaceAll('+', 'Y')}';
     await storage.write(key: _keyAlias, value: id);
     return id;
   }
@@ -81,7 +82,8 @@ class LicenseManager {
 
   /// 验证激活码格式：TERM-XXXX-XXXX-XXXX-XXXX
   bool verifyActivationCode(String code) {
-    final re = RegExp(r'^TERM-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$');
+    final re =
+        RegExp(r'^TERM-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$');
     if (!re.hasMatch(code)) return false;
     // 简单校验和：每段首字符的 ASCII 和 mod 37
     final parts = code.split('-').sublist(1);
@@ -140,7 +142,8 @@ class LicenseManager {
     await _clearActivation();
   }
 
-  Future<void> _reportTamperToMaster(String reason, String deviceId, String deviceName) async {
+  Future<void> _reportTamperToMaster(
+      String reason, String deviceId, String deviceName) async {
     // 通过 HTTP 上报主端 MasterAlertServer (:9990)
     try {
       final client = HttpClient();

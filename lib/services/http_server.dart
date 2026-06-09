@@ -62,7 +62,8 @@ class HttpServerService {
     _authToken = _generateToken();
 
     _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
-    print('[HTTP] Server started on port $port (auth token: ${_authToken!.substring(0, 8)}...)');
+    print(
+        '[HTTP] Server started on port $port (auth token: ${_authToken!.substring(0, 8)}...)');
     await for (final req in _server!) {
       _handleRequest(req);
     }
@@ -70,7 +71,8 @@ class HttpServerService {
 
   /// 生成 32 字节随机 Token
   String _generateToken() {
-    final rand = List<int>.generate(32, (_) => DateTime.now().microsecondsSinceEpoch % 256);
+    final rand = List<int>.generate(
+        32, (_) => DateTime.now().microsecondsSinceEpoch % 256);
     // 简单 Base64 编码
     return base64Encode(rand);
   }
@@ -151,14 +153,16 @@ class HttpServerService {
       }
       // 非 test-mode 直接拒绝
       _addAuditLog(action, 'BLOCKED_BY_SAFE_MODE', clientIp);
-      _respondForbidden(req, 'SAFE_MODE is enabled. Action "$action" is blocked.');
+      _respondForbidden(
+          req, 'SAFE_MODE is enabled. Action "$action" is blocked.');
       return false;
     }
 
     // 2. 授权检查
     if (!_isAuthorized(req)) {
       _addAuditLog(action, 'UNAUTHORIZED', clientIp);
-      _respondForbidden(req, 'Unauthorized. Provide x-auth-token header or token query param.');
+      _respondForbidden(req,
+          'Unauthorized. Provide x-auth-token header or token query param.');
       return false;
     }
 
@@ -188,21 +192,26 @@ class HttpServerService {
     if (!_checkDangerousAction(req, 'shutdown')) return;
     final (cmd, args) = _shutdownCmd();
     Process.start(cmd, args);
-    _respondOk(req, {'result': 'shutdown_initiated', 'platform': Platform.operatingSystem});
+    _respondOk(req,
+        {'result': 'shutdown_initiated', 'platform': Platform.operatingSystem});
   }
 
   void _handleRestart(HttpRequest req) {
     if (!_checkDangerousAction(req, 'restart')) return;
     final (cmd, args) = _restartCmd();
     Process.start(cmd, args);
-    _respondOk(req, {'result': 'restart_initiated', 'platform': Platform.operatingSystem});
+    _respondOk(req,
+        {'result': 'restart_initiated', 'platform': Platform.operatingSystem});
   }
 
   void _handleLockScreen(HttpRequest req) {
     if (!_checkDangerousAction(req, 'lock_screen')) return;
     final (cmd, args) = _lockScreenCmd();
     Process.start(cmd, args);
-    _respondOk(req, {'result': 'lock_screen_initiated', 'platform': Platform.operatingSystem});
+    _respondOk(req, {
+      'result': 'lock_screen_initiated',
+      'platform': Platform.operatingSystem
+    });
   }
 
   // ── 安全查询端点 ─────────────────────────────────
@@ -210,14 +219,18 @@ class HttpServerService {
   void _handleSafeModeQuery(HttpRequest req) {
     _respondOk(req, {
       'safeMode': _safeMode,
-      'message': _safeMode ? 'SAFE_MODE is ON — dangerous actions are blocked' : 'SAFE_MODE is OFF — normal operation',
+      'message': _safeMode
+          ? 'SAFE_MODE is ON — dangerous actions are blocked'
+          : 'SAFE_MODE is OFF — normal operation',
     });
   }
 
   void _handleAuthTokenRequest(HttpRequest req) {
     // 仅本地访问可获取 Token
     final clientIp = req.connectionInfo?.remoteAddress.address ?? '';
-    if (clientIp != '127.0.0.1' && clientIp != '::1' && clientIp != '0:0:0:0:0:0:0:1') {
+    if (clientIp != '127.0.0.1' &&
+        clientIp != '::1' &&
+        clientIp != '0:0:0:0:0:0:0:1') {
       _respondForbidden(req, 'Token only available from localhost');
       return;
     }
@@ -232,14 +245,16 @@ class HttpServerService {
   /// 返回对应平台的 (command, arguments)
   (String, List<String>) _shutdownCmd() {
     if (Platform.isWindows) return ('shutdown', ['/s', '/t', '0']);
-    if (Platform.isMacOS) return ('osascript', ['-e', 'tell app "System Events" to shut down']);
+    if (Platform.isMacOS)
+      return ('osascript', ['-e', 'tell app "System Events" to shut down']);
     if (Platform.isLinux) return ('systemctl', ['poweroff']);
     return ('shutdown', ['/s', '/t', '0']); // fallback
   }
 
   (String, List<String>) _restartCmd() {
     if (Platform.isWindows) return ('shutdown', ['/r', '/t', '0']);
-    if (Platform.isMacOS) return ('osascript', ['-e', 'tell app "System Events" to restart']);
+    if (Platform.isMacOS)
+      return ('osascript', ['-e', 'tell app "System Events" to restart']);
     if (Platform.isLinux) return ('systemctl', ['reboot']);
     return ('shutdown', ['/r', '/t', '0']); // fallback
   }

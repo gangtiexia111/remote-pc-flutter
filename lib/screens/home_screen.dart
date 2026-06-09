@@ -112,7 +112,8 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 从本地 HTTP 服务获取授权 Token
   Future<void> _fetchAuthToken() async {
     try {
-      final resp = await http.get(Uri.parse('http://127.0.0.1:9998/auth-token'));
+      final resp =
+          await http.get(Uri.parse('http://127.0.0.1:9998/auth-token'));
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body) as Map<String, dynamic>;
         setState(() {
@@ -132,7 +133,9 @@ class _HomeScreenState extends State<HomeScreen> {
     _saveSetting('safeMode', value);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(value ? '⚠️ SAFE_MODE 已开启 — 危险指令将被拦截' : '✅ SAFE_MODE 已关闭 — 危险指令可正常执行'),
+        content: Text(value
+            ? '⚠️ SAFE_MODE 已开启 — 危险指令将被拦截'
+            : '✅ SAFE_MODE 已关闭 — 危险指令可正常执行'),
         backgroundColor: value ? Colors.orange : Colors.green,
       ),
     );
@@ -192,7 +195,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// 判断是否为危险指令
   bool _isDangerousCommand(String cmd) {
-    return ['shutdown', 'restart', 'lock', 'sleep', 'self_destruct'].contains(cmd);
+    return ['shutdown', 'restart', 'lock', 'sleep', 'self_destruct']
+        .contains(cmd);
   }
 
   /// 危险指令二次确认对话框
@@ -437,7 +441,9 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: _safeMode ? Colors.orange.withValues(alpha: 0.15) : Colors.green.withValues(alpha: 0.15),
+            color: _safeMode
+                ? Colors.orange.withValues(alpha: 0.15)
+                : Colors.green.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: _safeMode ? Colors.orange : Colors.green,
@@ -536,33 +542,40 @@ class _HomeScreenState extends State<HomeScreen> {
                       return Card(
                         child: ListTile(
                           leading: Icon(
-                            d.isOnline ? Icons.computer : Icons.computer_outlined,
+                            d.isOnline
+                                ? Icons.computer
+                                : Icons.computer_outlined,
                             color: d.isOnline ? Colors.green : Colors.grey,
                           ),
                           title: Text(d.name),
-                          subtitle: Text('${d.ip}:${d.port} · ${d.statusLabel}'),
+                          subtitle:
+                              Text('${d.ip}:${d.port} · ${d.statusLabel}'),
                           trailing: d.isOnline
                               ? PopupMenuButton<String>(
-                                  onSelected: (v) => _sendLanCommandToDevice(d, v),
+                                  onSelected: (v) =>
+                                      _sendLanCommandToDevice(d, v),
                                   itemBuilder: (_) => [
                                     const PopupMenuItem(
                                       value: 'shutdown',
                                       child: ListTile(
-                                        leading: Icon(Icons.power_settings_new, color: Colors.red),
+                                        leading: Icon(Icons.power_settings_new,
+                                            color: Colors.red),
                                         title: Text('关机'),
                                       ),
                                     ),
                                     const PopupMenuItem(
                                       value: 'restart',
                                       child: ListTile(
-                                        leading: Icon(Icons.restart_alt, color: Colors.orange),
+                                        leading: Icon(Icons.restart_alt,
+                                            color: Colors.orange),
                                         title: Text('重启'),
                                       ),
                                     ),
                                     const PopupMenuItem(
                                       value: 'lock',
                                       child: ListTile(
-                                        leading: Icon(Icons.lock, color: Colors.blue),
+                                        leading: Icon(Icons.lock,
+                                            color: Colors.blue),
                                         title: Text('锁屏'),
                                       ),
                                     ),
@@ -693,7 +706,8 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             children: [
               ElevatedButton.icon(
-                onPressed: _webrtcState == WebRtcState.idle ? _createRoom : null,
+                onPressed:
+                    _webrtcState == WebRtcState.idle ? _createRoom : null,
                 icon: const Icon(Icons.add),
                 label: const Text('创建房间（主控端）'),
               ),
@@ -728,9 +742,12 @@ class _HomeScreenState extends State<HomeScreen> {
               spacing: 8,
               children: [
                 _buildControlButton('lock', '锁屏', Icons.lock, Colors.blue),
-                _buildControlButton('sleep', '休眠', Icons.bedtime, Colors.indigo),
-                _buildControlButton('restart', '重启', Icons.restart_alt, Colors.orange),
-                _buildControlButton('shutdown', '关机', Icons.power_settings_new, Colors.red),
+                _buildControlButton(
+                    'sleep', '休眠', Icons.bedtime, Colors.indigo),
+                _buildControlButton(
+                    'restart', '重启', Icons.restart_alt, Colors.orange),
+                _buildControlButton(
+                    'shutdown', '关机', Icons.power_settings_new, Colors.red),
               ],
             ),
           ],
@@ -740,7 +757,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// 构建控制按钮（危险指令带警告色）
-  Widget _buildControlButton(String cmd, String label, IconData icon, Color color) {
+  Widget _buildControlButton(
+      String cmd, String label, IconData icon, Color color) {
     final isDangerous = _isDangerousCommand(cmd);
     final blocked = _safeMode && isDangerous;
 

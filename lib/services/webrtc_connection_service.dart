@@ -226,10 +226,8 @@ class WebRtcConnectionService {
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _setState(WebRtcState.connected);
         callbacks.onConnected?.call(_currentRoomId ?? '');
-      } else if (state ==
-              RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
-          state ==
-              RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
         _setState(WebRtcState.failed);
         callbacks.onDisconnected?.call(_currentRoomId ?? '');
       }
@@ -249,7 +247,8 @@ class WebRtcConnectionService {
     };
   }
 
-  void _handleDataChannelMessage(String data) {    try {
+  void _handleDataChannelMessage(String data) {
+    try {
       final msg = jsonDecode(data) as Map<String, dynamic>;
       final cmd = msg['command'] as String?;
       if (cmd != null) {

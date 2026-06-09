@@ -126,9 +126,11 @@ class _SecurityScreenState extends State<SecurityScreen> {
     final response = _firewall.verifyResponse(challenge, '');
     setState(() {
       _lastChallenge = challenge;
-      _lastVerifyResult = response ? 'PASS' : 'FAIL (expected — empty response)';
+      _lastVerifyResult =
+          response ? 'PASS' : 'FAIL (expected — empty response)';
     });
-    _addEvent('medium', '手动验证挑战已生成: ${challenge.substring(0, 16)}...', 'DynamicFirewall');
+    _addEvent('medium', '手动验证挑战已生成: ${challenge.substring(0, 16)}...',
+        'DynamicFirewall');
   }
 
   /// 手动完整性校验
@@ -244,7 +246,8 @@ class _SecurityScreenState extends State<SecurityScreen> {
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text('设备 ID: $_deviceId',
-                          style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.grey)),
                     ),
                 ],
               ),
@@ -259,8 +262,14 @@ class _SecurityScreenState extends State<SecurityScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _StatItem(label: '成功', value: _heartbeatSuccessCount, color: Colors.green),
-                  _StatItem(label: '失败', value: _heartbeatFailCount, color: Colors.red),
+                  _StatItem(
+                      label: '成功',
+                      value: _heartbeatSuccessCount,
+                      color: Colors.green),
+                  _StatItem(
+                      label: '失败',
+                      value: _heartbeatFailCount,
+                      color: Colors.red),
                   _StatItem(
                     label: '成功率',
                     value: _heartbeatSuccessCount + _heartbeatFailCount > 0
@@ -273,7 +282,9 @@ class _SecurityScreenState extends State<SecurityScreen> {
                     _StatItem(
                       label: '上次校验',
                       value: _lastVerifyResult,
-                      color: _lastVerifyResult == 'PASS' ? Colors.green : Colors.red,
+                      color: _lastVerifyResult == 'PASS'
+                          ? Colors.green
+                          : Colors.red,
                       isText: true,
                     ),
                 ],
@@ -328,7 +339,8 @@ class _SecurityScreenState extends State<SecurityScreen> {
                           dense: true,
                           leading: Icon(
                             _severityIcon(e['severity'] as String? ?? 'low'),
-                            color: _severityColor(e['severity'] as String? ?? 'low'),
+                            color: _severityColor(
+                                e['severity'] as String? ?? 'low'),
                             size: 20,
                           ),
                           title: Text(
@@ -341,7 +353,8 @@ class _SecurityScreenState extends State<SecurityScreen> {
                           ),
                           trailing: Text(
                             _formatTime(e['timestamp'] as int?),
-                            style: const TextStyle(color: Colors.grey, fontSize: 11),
+                            style: const TextStyle(
+                                color: Colors.grey, fontSize: 11),
                           ),
                         ),
                       );
@@ -357,7 +370,9 @@ class _SecurityScreenState extends State<SecurityScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: active ? color.withValues(alpha: 0.1) : Colors.grey.withValues(alpha: 0.1),
+        color: active
+            ? color.withValues(alpha: 0.1)
+            : Colors.grey.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: active ? color : Colors.grey, width: 1),
       ),
@@ -373,18 +388,18 @@ class _SecurityScreenState extends State<SecurityScreen> {
   }
 
   IconData _severityIcon(String s) => switch (s) {
-    'high' => Icons.error,
-    'medium' => Icons.warning,
-    'info' => Icons.info,
-    _ => Icons.check_circle,
-  };
+        'high' => Icons.error,
+        'medium' => Icons.warning,
+        'info' => Icons.info,
+        _ => Icons.check_circle,
+      };
 
   Color _severityColor(String s) => switch (s) {
-    'high' => Colors.red,
-    'medium' => Colors.orange,
-    'info' => Colors.blue,
-    _ => Colors.green,
-  };
+        'high' => Colors.red,
+        'medium' => Colors.orange,
+        'info' => Colors.blue,
+        _ => Colors.green,
+      };
 
   String _formatTime(int? ts) {
     if (ts == null) return '';
@@ -422,7 +437,10 @@ class _StatusIndicator extends StatelessWidget {
             color: active ? color : Colors.grey,
             shape: BoxShape.circle,
             boxShadow: active
-                ? [BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 8)]
+                ? [
+                    BoxShadow(
+                        color: color.withValues(alpha: 0.4), blurRadius: 8)
+                  ]
                 : null,
           ),
         ),

@@ -43,8 +43,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _darkMode = widget.darkMode;
     _safeMode = widget.safeMode;
-    _signalingUrlController =
-        TextEditingController(text: widget.signalingUrl);
+    _signalingUrlController = TextEditingController(text: widget.signalingUrl);
     _loadAutoStart();
   }
 
@@ -112,11 +111,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// SAFE_MODE 安全模式卡片
   Card _buildSafeModeCard() {
     return Card(
-      color: _safeMode ? Colors.orange.withValues(alpha: 0.08) : Colors.green.withValues(alpha: 0.05),
+      color: _safeMode
+          ? Colors.orange.withValues(alpha: 0.08)
+          : Colors.green.withValues(alpha: 0.05),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: _safeMode ? Colors.orange.withValues(alpha: 0.3) : Colors.green.withValues(alpha: 0.2),
+          color: _safeMode
+              ? Colors.orange.withValues(alpha: 0.3)
+              : Colors.green.withValues(alpha: 0.2),
           width: 1,
         ),
       ),
@@ -148,7 +151,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             : '已关闭 — 危险指令可正常执行，请确保在受控环境中使用',
                         style: TextStyle(
                           fontSize: 12,
-                          color: _safeMode ? Colors.orange[700] : Colors.green[700],
+                          color: _safeMode
+                              ? Colors.orange[700]
+                              : Colors.green[700],
                         ),
                       ),
                     ],
@@ -238,8 +243,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 const Icon(Icons.cloud, size: 20),
                 const SizedBox(width: 8),
-                Text('跨网络配置',
-                    style: Theme.of(context).textTheme.titleMedium),
+                Text('跨网络配置', style: Theme.of(context).textTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 8),

@@ -67,7 +67,9 @@ class UdpDiscoveryService {
           port: msg['port'] as int,
         )..markAlive();
       }
-      for (final cb in _callbacks) { cb(_devices[id]!); }
+      for (final cb in _callbacks) {
+        cb(_devices[id]!);
+      }
     } catch (_) {}
   }
 

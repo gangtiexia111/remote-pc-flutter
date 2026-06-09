@@ -19,24 +19,24 @@ class Device {
   }) : lastSeen = lastSeen ?? DateTime.now().millisecondsSinceEpoch;
 
   Map<String, dynamic> toMap() => {
-    'id': id,
-    'name': name,
-    'ip': ip,
-    'port': port,
-    'isOnline': isOnline,
-    'failCount': failCount,
-    'lastSeen': lastSeen,
-  };
+        'id': id,
+        'name': name,
+        'ip': ip,
+        'port': port,
+        'isOnline': isOnline,
+        'failCount': failCount,
+        'lastSeen': lastSeen,
+      };
 
   factory Device.fromMap(Map<String, dynamic> m) => Device(
-    id: m['id'] as String,
-    name: m['name'] as String,
-    ip: m['ip'] as String,
-    port: m['port'] as int,
-    isOnline: m['isOnline'] as bool? ?? false,
-    failCount: m['failCount'] as int? ?? 0,
-    lastSeen: m['lastSeen'] as int?,
-  );
+        id: m['id'] as String,
+        name: m['name'] as String,
+        ip: m['ip'] as String,
+        port: m['port'] as int,
+        isOnline: m['isOnline'] as bool? ?? false,
+        failCount: m['failCount'] as int? ?? 0,
+        lastSeen: m['lastSeen'] as int?,
+      );
 
   void markAlive() {
     isOnline = true;

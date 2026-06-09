@@ -23,7 +23,8 @@ class NativeSecurityBridge {
   /// 反渗透检测：检查关键系统文件完整性
   static Future<bool> verifySystemIntegrity() async {
     try {
-      return await _channel.invokeMethod('verifySystemIntegrity') as bool? ?? true;
+      return await _channel.invokeMethod('verifySystemIntegrity') as bool? ??
+          true;
     } catch (_) {
       return true; // 隔离失败
     }
@@ -32,7 +33,9 @@ class NativeSecurityBridge {
   /// 动态校验：向原生层提交 challenge，获取原生层计算的 response
   static Future<String> computeNativeResponse(String challenge) async {
     try {
-      return await _channel.invokeMethod('computeNativeResponse', {'challenge': challenge}) as String? ?? '';
+      return await _channel.invokeMethod(
+              'computeNativeResponse', {'challenge': challenge}) as String? ??
+          '';
     } catch (_) {
       return '';
     }
@@ -41,7 +44,8 @@ class NativeSecurityBridge {
   /// 获取设备硬件指纹（原生层实现）
   static Future<String> getHardwareFingerprint() async {
     try {
-      return await _channel.invokeMethod('getHardwareFingerprint') as String? ?? '';
+      return await _channel.invokeMethod('getHardwareFingerprint') as String? ??
+          '';
     } catch (_) {
       return '';
     }
@@ -50,7 +54,9 @@ class NativeSecurityBridge {
   /// 原生层自毁（清除所有本地数据 + 上报主端）
   static Future<bool> nativeSelfDestruct(String reason) async {
     try {
-      return await _channel.invokeMethod('nativeSelfDestruct', {'reason': reason}) as bool? ?? false;
+      return await _channel.invokeMethod(
+              'nativeSelfDestruct', {'reason': reason}) as bool? ??
+          false;
     } catch (_) {
       return false;
     }

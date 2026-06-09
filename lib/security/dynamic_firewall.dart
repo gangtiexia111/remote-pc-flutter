@@ -14,8 +14,9 @@ import 'package:cryptography/cryptography.dart' as crypto;
 class DynamicFirewall {
   // === 多语言动态字符池 ===
   static const _chinese = '验证码动态防火墙安全授权';
-  static const _arabic  = '\u0627\u0644\u062a\u062d\u0642\u0642\u062c\u062f\u0627\u0631\u0627\u0644\u0646\u0627\u0631\u0627\u0644\u0623\u0645\u0646\u0627\u0644\u062a\u0631\u062e\u064a\u0635';  // 阿拉伯文
-  static const _digits   = '3489712056';
+  static const _arabic =
+      '\u0627\u0644\u062a\u062d\u0642\u0642\u062c\u062f\u0627\u0631\u0627\u0644\u0646\u0627\u0631\u0627\u0644\u0623\u0645\u0646\u0627\u0644\u062a\u0631\u062e\u064a\u0635'; // 阿拉伯文
+  static const _digits = '3489712056';
 
   final Random _rng = Random.secure();
   final Map<String, dynamic> _dynamicState = {};
@@ -33,13 +34,27 @@ class DynamicFirewall {
     for (int i = 0; i < len; i++) {
       final pool = _rng.nextInt(4);
       switch (pool) {
-        case 0: { buf.write(_chinese[_rng.nextInt(_chinese.length)]); break; }
-        case 1: { buf.write(_arabic[_rng.nextInt(_arabic.length)]);  break; }
-        case 2: { buf.write(_digits[_rng.nextInt(_digits.length)]);   break; }
+        case 0:
+          {
+            buf.write(_chinese[_rng.nextInt(_chinese.length)]);
+            break;
+          }
+        case 1:
+          {
+            buf.write(_arabic[_rng.nextInt(_arabic.length)]);
+            break;
+          }
+        case 2:
+          {
+            buf.write(_digits[_rng.nextInt(_digits.length)]);
+            break;
+          }
         case 3:
-          { // 插入埃及象形文字（Unicode U+13000..U+1342F 区块）
-          buf.writeCharCode(0x13000 + _rng.nextInt(0x430));
-          break; }
+          {
+            // 插入埃及象形文字（Unicode U+13000..U+1342F 区块）
+            buf.writeCharCode(0x13000 + _rng.nextInt(0x430));
+            break;
+          }
       }
     }
     final challenge = buf.toString();
@@ -54,7 +69,10 @@ class DynamicFirewall {
     if (challenge.isEmpty || response.isEmpty) return false;
     // 动态规则：取 challenge 中 Unicode 码点之和 mod 997 作为期望值
     int sum = 0;
-    for (final r in challenge.runes) { sum += r; }    final expected = (sum % 997).toString();
+    for (final r in challenge.runes) {
+      sum += r;
+    }
+    final expected = (sum % 997).toString();
     // 常量时间比较，防时序攻击
     return _constantTimeEqual(response, expected);
   }
@@ -102,7 +120,10 @@ class DynamicFirewall {
   /// 模拟原生层校验（实际通过 MethodChannel 调用 OC/Java/C++）
   String _simulateNativeVerify(String challenge) {
     int sum = 0;
-    for (final r in challenge.runes) { sum += r; }    return (sum % 997).toString();
+    for (final r in challenge.runes) {
+      sum += r;
+    }
+    return (sum % 997).toString();
   }
 
   /// 获取当前动态状态（用于上报/调试）
