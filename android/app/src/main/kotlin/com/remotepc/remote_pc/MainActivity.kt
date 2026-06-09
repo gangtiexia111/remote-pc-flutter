@@ -27,10 +27,6 @@ class MainActivity : FlutterActivity() {
                     "verifySystemIntegrity" -> {
                         result.success(verifySystemIntegrity())
                     }
-                    "computeNativeResponse" -> {
-                        val challenge = call.argument<String>("challenge") ?: ""
-                        result.success(computeNativeResponse(challenge))
-                    }
                     "getHardwareFingerprint" -> {
                         result.success(getHardwareFingerprint())
                     }
@@ -136,15 +132,6 @@ class MainActivity : FlutterActivity() {
      * 算法：challenge 中 Unicode 码点之和 mod 997
      * 与 Dart 侧 DynamicFirewall.verifyResponse 对应
      */
-    private fun computeNativeResponse(challenge: String): String {
-        if (challenge.isEmpty()) return ""
-        var sum = 0
-        for (codePoint in challenge.codePoints().toArray()) {
-            sum += codePoint
-        }
-        return (sum % 997).toString()
-    }
-
     // ── 硬件指纹 ──────────────────────────────────────
 
     /**

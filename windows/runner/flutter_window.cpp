@@ -102,38 +102,6 @@ static std::string GetHardwareFingerprint() {
     return raw;
 }
 
-// Compute native response: sum of Unicode code points mod 997
-static std::string ComputeNativeResponse(const std::string& challenge) {
-    if (challenge.empty()) return "";
-
-    int sum = 0;
-    const unsigned char* p = reinterpret_cast<const unsigned char*>(challenge.data());
-    const unsigned char* end = p + challenge.size();
-
-    while (p < end) {
-        uint32_t cp = 0;
-        if ((*p & 0x80) == 0) {
-            cp = *p++;
-        } else if ((*p & 0xE0) == 0xC0) {
-            cp = (*p++ & 0x1F) << 6;
-            if (p < end) cp |= (*p++ & 0x3F);
-        } else if ((*p & 0xF0) == 0xE0) {
-            cp = (*p++ & 0x0F) << 12;
-            if (p < end) cp |= (*p++ & 0x3F) << 6;
-            if (p < end) cp |= (*p++ & 0x3F);
-        } else if ((*p & 0xF8) == 0xF0) {
-            cp = (*p++ & 0x07) << 18;
-            if (p < end) cp |= (*p++ & 0x3F) << 12;
-            if (p < end) cp |= (*p++ & 0x3F) << 6;
-            if (p < end) cp |= (*p++ & 0x3F);
-        } else {
-            p++;
-        }
-        sum += static_cast<int>(cp);
-    }
-
-    return std::to_string(sum % 997);
-}
 
 // System integrity check (simplified)
 static bool VerifySystemIntegrity() {
@@ -210,16 +178,6 @@ bool FlutterWindow::OnCreate() {
                 result->Success(flutter::EncodableValue(IsBeingDebugged()));
             } else if (call.method_name() == "verifySystemIntegrity") {
                 result->Success(flutter::EncodableValue(VerifySystemIntegrity()));
-            } else if (call.method_name() == "computeNativeResponse") {
-                const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
-                std::string challenge;
-                if (args) {
-                    auto it = args->find(flutter::EncodableValue("challenge"));
-                    if (it != args->end()) {
-                        challenge = std::get<std::string>(it->second);
-                    }
-                }
-                result->Success(flutter::EncodableValue(ComputeNativeResponse(challenge)));
             } else if (call.method_name() == "getHardwareFingerprint") {
                 result->Success(flutter::EncodableValue(GetHardwareFingerprint()));
             } else if (call.method_name() == "nativeSelfDestruct") {

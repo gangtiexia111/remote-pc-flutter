@@ -25,10 +25,6 @@ class MainFlutterWindow: NSWindow {
         result(Self.isBeingDebugged())
       case "verifySystemIntegrity":
         result(Self.verifySystemIntegrity())
-      case "computeNativeResponse":
-        let args = call.arguments as? [String: Any]
-        let challenge = args?["challenge"] as? String ?? ""
-        result(Self.computeNativeResponse(challenge: challenge))
       case "getHardwareFingerprint":
         result(Self.getHardwareFingerprint())
       case "nativeSelfDestruct":
@@ -86,16 +82,6 @@ class MainFlutterWindow: NSWindow {
   /// Native compute verification response
   /// Algorithm: sum of Unicode code points in challenge mod 997
   /// Corresponds to Dart side DynamicFirewall.verifyResponse
-  private static func computeNativeResponse(challenge: String) -> String {
-    if challenge.isEmpty { return "" }
-
-    var sum = 0
-    for codePoint in challenge.unicodeScalars {
-      sum += Int(codePoint.value)
-    }
-    return String(sum % 997)
-  }
-
   // -- Hardware fingerprint --
 
   /// Generate hardware fingerprint

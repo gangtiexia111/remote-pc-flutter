@@ -8,7 +8,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// 设计思路：
 /// 1. 验证字符串动态生成，每次启动不同
 /// 2. 混合中英文、阿拉伯文、埃及象形文字、数字，增加逆向难度
-/// 3. 关键校验逻辑通过 MethodChannel 调用原生层（OC/Swift/Java/C++）
+/// 3. 关键校验逻辑在 Dart 侧使用 HMAC-SHA256 完成（v1.0.3+）
 /// 4. 心跳校验：每 N 分钟重新验证一次，失败触发自毁
 ///
 /// 多语言字符池（部分埃及象形文字为 Unicode 私有区模拟）：

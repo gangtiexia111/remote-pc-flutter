@@ -31,6 +31,9 @@ class NativeSecurityBridge {
   }
 
   /// 动态校验：向原生层提交 challenge，获取原生层计算的 response
+  /// 注意：v1.0.3 起，DynamicFirewall 已在 Dart 侧使用 HMAC-SHA256 完成验证，
+  /// 此方法保留用于兼容性，实际已不再被调用。
+  @Deprecated('Use DynamicFirewall.verifyResponse() directly (HMAC-SHA256)')
   static Future<String> computeNativeResponse(String challenge) async {
     try {
       return await _channel.invokeMethod(
