@@ -1,9 +1,9 @@
 import Cocoa
 import FlutterMacOS
-import CommonCrypto
+import CryptoKit
 
-/// Remote PC 主窗口
-/// v1.0.3: 集成原生安全 MethodChannel
+/// Remote PC main window
+/// v1.0.3: integrated native security MethodChannel
 class MainFlutterWindow: NSWindow {
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -13,7 +13,7 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
-    // ── 注册原生安全 MethodChannel ──────────────
+    // -- Register native security MethodChannel --
     let channel = FlutterMethodChannel(
       name: "com.remotepc/security",
       binaryMessenger: flutterViewController.engine.binaryMessenger
@@ -43,9 +43,9 @@ class MainFlutterWindow: NSWindow {
     super.awakeFromNib()
   }
 
-  // ── 调试检测 ──────────────────────────────────────
+  // -- Debug detection --
 
-  /// 检测是否正在被调试
+  /// Detect if being debugged
   /// macOS: sysctl kinfo_proc -> P_TRACED flag
   private static func isBeingDebugged() -> Bool {
     var info = kinfo_proc()
@@ -59,15 +59,12 @@ class MainFlutterWindow: NSWindow {
     return false
   }
 
-  // ── 系统完整性校验 ────────────────────────────────
+  // -- System integrity verification --
 
-  /// 校验系统完整性
+  /// Verify system integrity
   private static func verifySystemIntegrity() -> Bool {
-    // 检查代码签名
-    // 简化实现：检查应用是否通过 Mac App Store 或公证
     let bundlePath = Bundle.main.bundlePath
 
-    // 使用 codesign 检查签名
     let task = Process()
     task.launchPath = "/usr/bin/codesign"
     task.arguments = ["-v", bundlePath]
@@ -80,16 +77,15 @@ class MainFlutterWindow: NSWindow {
       task.waitUntilExit()
       return task.terminationStatus == 0
     } catch {
-      // codesign 不可用时，默认返回 true
       return true
     }
   }
 
-  // ── 动态验证 ──────────────────────────────────────
+  // -- Dynamic verification --
 
-  /// 原生层计算验证响应
-  /// 算法：challenge 中 Unicode 码点之和 mod 997
-  /// 与 Dart 侧 DynamicFirewall.verifyResponse 对应
+  /// Native compute verification response
+  /// Algorithm: sum of Unicode code points in challenge mod 997
+  /// Corresponds to Dart side DynamicFirewall.verifyResponse
   private static func computeNativeResponse(challenge: String) -> String {
     if challenge.isEmpty { return "" }
 
@@ -100,59 +96,82 @@ class MainFlutterWindow: NSWindow {
     return String(sum % 997)
   }
 
-  // ── 硬件指纹 ──────────────────────────────────────
+  // -- Hardware fingerprint --
 
-  /// 生成硬件指纹
-  /// 组合：IOPlatformSerialNumber + IOPlatformUUID → SHA-256
+  /// Generate hardware fingerprint
+  /// Uses system_profiler to get hardware info, then SHA-256 via CryptoKit
   private static func getHardwareFingerprint() -> String {
-    let serialNumber = getIOPlatformProperty("serial-number") ?? "unknown"
-    let uuid = getIOPlatformProperty("UUID") ?? "unknown"
+    let serialNumber = runSystemProfilerQuery(key: "serial_number") ?? "unknown"
+    let hardwareUUID = runSystemProfilerQuery(key: "hardware_uuid") ?? "unknown"
 
-    let raw = "\(serialNumber)|\(uuid)"
+    let raw = "\(serialNumber)|\(hardwareUUID)"
 
-    // SHA-256
-    var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-    raw.data(using: .utf8)?.withUnsafeBytes {
-      _ = CC_SHA256($0.baseAddress, CC_LONG(raw.count), &hash)
-    }
-
-    return hash.map { String(format: "%02x", $0) }.joined()
+    let data = raw.data(using: .utf8) ?? Data()
+    let hash = SHA256.hash(data: data)
+    return hash.compactMap { String(format: "%02x", $0) }.joined()
   }
 
-  /// 从 IOKit 获取平台属性
-  private static func getIOPlatformProperty(_ key: String) -> String? {
-    let service = IOServiceGetMatchingService(kIOMainPortDefault,
-      IOServiceMatching("IOPlatformExpertDevice"))
+  /// Query hardware info via system_profiler (avoids IOKit linkage)
+  private static func runSystemProfilerQuery(key: String) -> String? {
+    let task = Process()
+    task.launchPath = "/usr/sbin/system_profiler"
+    task.arguments = ["SPHardwareDataType", "-json"]
 
-    defer { IOObjectRelease(service) }
+    let pipe = Pipe()
+    task.standardOutput = pipe
 
-    guard service != 0 else { return nil }
+    do {
+      try task.run()
+      task.waitUntilExit()
 
-    if let data = IORegistryEntryCreateCFProperty(service, key as CFString,
-      kCFAllocatorDefault, 0) {
-      if let value = data.takeRetainedValue() as? Data {
-        return String(data: value, encoding: .utf8)?.trimmingCharacters(
-          in: CharacterSet(charactersIn: "\0"))
-      }
-      if let value = data.takeRetainedValue() as? String {
+      let data = pipe.fileHandleForReading.readDataToEndOfFile()
+      if let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+         let first = json.first,
+         let value = first[key] as? String {
         return value
       }
+    } catch {
+      // Fallback: try ioreg
+    }
+
+    // Fallback to ioreg if system_profiler fails
+    let ioregTask = Process()
+    ioregTask.launchPath = "/usr/sbin/ioreg"
+    ioregTask.arguments = ["-l", "-d", "2"]
+
+    let ioregPipe = Pipe()
+    ioregTask.standardOutput = ioregPipe
+
+    do {
+      try ioregTask.run()
+      ioregTask.waitUntilExit()
+
+      let outputData = ioregPipe.fileHandleForReading.readDataToEndOfFile()
+      if let output = String(data: outputData, encoding: .utf8) {
+        let pattern = "\"\(key)\" = \"([^\"]+)\""
+        if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+           let match = regex.firstMatch(in: output, options: [], range: NSRange(location: 0, length: output.utf16.count)) {
+          if let range = Range(match.range(at: 1), in: output) {
+            return String(output[range])
+          }
+        }
+      }
+    } catch {
+      // ioreg also failed
     }
 
     return nil
   }
 
-  // ── 原生自毁 ──────────────────────────────────────
+  // -- Native self-destruct --
 
-  /// 原生自毁：清除应用数据
+  /// Native self-destruct: clear application data
   private static func nativeSelfDestruct(reason: String) -> Bool {
     let fileManager = FileManager.default
 
-    // 清除 Application Support 目录
     let appSupport = fileManager.urls(for: .applicationSupportDirectory,
       in: .userDomainMask).first?.appendingPathComponent("remote_pc")
 
-    // 清除 Preferences
     let prefs = fileManager.urls(for: .libraryDirectory,
       in: .userDomainMask).first?.appendingPathComponent("Preferences/remote_pc.plist")
 
@@ -170,11 +189,11 @@ class MainFlutterWindow: NSWindow {
       do {
         try fileManager.removeItem(at: prefs)
       } catch {
-        // plist 可能不存在
+        // plist may not exist
       }
     }
 
-    // 清除 Keychain
+    // Clear Keychain
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: "com.remotepc.activation",
