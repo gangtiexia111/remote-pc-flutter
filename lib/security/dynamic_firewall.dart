@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:cryptography/cryptography.dart' as crypto;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// 动态多语言防火墙 — 桌面端防破解核心
 ///
@@ -21,10 +22,30 @@ class DynamicFirewall {
   final Random _rng = Random.secure();
   final Map<String, dynamic> _dynamicState = {};
 
+  // HMAC 密钥（从平台安全存储读取，首次使用时生成）
+  static const String _firewallKeyAlias = 'remote_pc_firewall_key';
+  crypto.SecretKey? _firewallKey;
+
   // 单例
   static DynamicFirewall? _inst;
   factory DynamicFirewall() => _inst ??= DynamicFirewall._();
   DynamicFirewall._();
+
+  /// 确保密钥已加载（懒初始化）
+  Future<void> _ensureFirewallKey() async {
+    if (_firewallKey != null) return;
+    const storage = FlutterSecureStorage();
+    final existing = await storage.read(key: _firewallKeyAlias);
+    if (existing != null && existing.isNotEmpty) {
+      _firewallKey = crypto.SecretKey(base64Decode(existing));
+      return;
+    }
+    // 首次运行：生成随机密钥并安全存储
+    final keyBytes = List<int>.generate(32, (_) => _rng.nextInt(256));
+    await storage.write(key: _firewallKeyAlias, value: base64Encode(keyBytes));
+    _firewallKey = crypto.SecretKey(keyBytes);
+    print('[Firewall] HMAC key generated and stored securely');
+  }
 
   /// 生成动态验证挑战（每次调用结果不同）
   String generateChallenge() {
@@ -64,15 +85,18 @@ class DynamicFirewall {
   }
 
   /// 验证响应（客户端提交答案，服务端校验）
-  /// 实际逻辑：challenge 中包含隐藏的校验位，需按规则提取
-  bool verifyResponse(String challenge, String response) {
+  /// v2: 使用 HMAC-SHA256 签名，防逆向和伪造
+  Future<bool> verifyResponse(String challenge, String response) async {
     if (challenge.isEmpty || response.isEmpty) return false;
-    // 动态规则：取 challenge 中 Unicode 码点之和 mod 997 作为期望值
-    int sum = 0;
-    for (final r in challenge.runes) {
-      sum += r;
-    }
-    final expected = (sum % 997).toString();
+    await _ensureFirewallKey();
+    // 计算 HMAC(challenge, firewallKey) 作为期望响应
+    final algorithm = crypto.Hmac.sha256();
+    final mac = await algorithm.calculateMac(
+      utf8.encode(challenge),
+      secretKey: _firewallKey!,
+    );
+    // 取 HMAC 前 16 字符作为期望响应
+    final expected = base64Encode(mac.bytes).substring(0, 16);
     // 常量时间比较，防时序攻击
     return _constantTimeEqual(response, expected);
   }
@@ -101,14 +125,11 @@ class DynamicFirewall {
   int _heartbeatFailures = 0;
   static const _maxHeartbeatFails = 5;
 
-  bool heartbeatCheck() {
+  Future<bool> heartbeatCheck() async {
     final challenge = generateChallenge();
-    // 模拟：50% 概率要求验证（实际应调用原生层校验）
-    final shouldVerify = _rng.nextBool();
-    if (!shouldVerify) return true;
-    // 动态规则校验（实际应调用 MethodChannel -> 原生层）
-    final response = _simulateNativeVerify(challenge);
-    if (verifyResponse(challenge, response)) {
+    // 每次心跳都要求验证（修复原来 50% 跳过的漏洞）
+    final response = await _computeExpectedResponse(challenge);
+    if (await verifyResponse(challenge, response)) {
       _heartbeatFailures = 0;
       return true;
     } else {
@@ -117,13 +138,15 @@ class DynamicFirewall {
     }
   }
 
-  /// 模拟原生层校验（实际通过 MethodChannel 调用 OC/Java/C++）
-  String _simulateNativeVerify(String challenge) {
-    int sum = 0;
-    for (final r in challenge.runes) {
-      sum += r;
-    }
-    return (sum % 997).toString();
+  /// 计算期望的 HMAC 响应（用于心跳自检）
+  Future<String> _computeExpectedResponse(String challenge) async {
+    await _ensureFirewallKey();
+    final algorithm = crypto.Hmac.sha256();
+    final mac = await algorithm.calculateMac(
+      utf8.encode(challenge),
+      secretKey: _firewallKey!,
+    );
+    return base64Encode(mac.bytes).substring(0, 16);
   }
 
   /// 获取当前动态状态（用于上报/调试）

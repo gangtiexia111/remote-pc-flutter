@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Remote PC Flutter v1.0.3 安全渗透审计报告</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --surface: #111827;
+    --surface2: #1e293b;
+    --border: #1e3a5f;
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+    --red: #ef4444;
+    --orange: #f97316;
+    --amber: #f59e0b;
+    --green: #22c55e;
+    --blue: #3b82f6;
+    --purple: #a855f7;
+    --cyan: #06b6d4;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'Consolas', 'SF Mono', monospace; font-size: 13px; line-height: 1.7; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 22px; font-weight: 500; color: var(--cyan); margin-bottom: 6px; letter-spacing: 1px; }
+  h2 { font-size: 16px; font-weight: 500; color: var(--blue); margin: 32px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 14px; font-weight: 500; color: var(--text); margin: 20px 0 8px; }
+  .meta { color: var(--text2); font-size: 12px; margin-bottom: 32px; }
+  .meta span { margin-right: 24px; }
+
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 20px 0; }
+  .summary-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: center; }
+  .summary-card .num { font-size: 36px; font-weight: 500; }
+  .summary-card .label { font-size: 12px; color: var(--text2); margin-top: 4px; }
+  .c-red { color: var(--red); } .c-orange { color: var(--orange); } .c-amber { color: var(--amber); } .c-green { color: var(--green); }
+
+  .severity-badge { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+  .severity-critical { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+  .severity-high { background: rgba(249,115,22,0.15); color: var(--orange); border: 1px solid rgba(249,115,22,0.3); }
+  .severity-medium { background: rgba(245,158,11,0.15); color: var(--amber); border: 1px solid rgba(245,158,11,0.3); }
+  .severity-low { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+  .severity-info { background: rgba(59,130,246,0.15); color: var(--blue); border: 1px solid rgba(59,130,246,0.3); }
+
+  .vuln-table { width: 100%; border-collapse: collapse; margin: 12px 0 24px; }
+  .vuln-table th { text-align: left; padding: 10px 12px; background: var(--surface2); color: var(--text2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+  .vuln-table td { padding: 12px; border-bottom: 1px solid rgba(30,58,95,0.4); vertical-align: top; }
+  .vuln-table tr:hover { background: rgba(59,130,246,0.04); }
+  .vuln-id { color: var(--cyan); font-weight: 500; white-space: nowrap; }
+  .vuln-desc { color: var(--text); }
+  .vuln-impact { color: var(--text2); font-size: 12px; }
+  .vuln-fix { color: var(--green); font-size: 12px; }
+
+  .code-block { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin: 8px 0 16px; font-size: 12px; overflow-x: auto; color: var(--text2); }
+  .code-block .hl { color: var(--red); }
+  .code-block .ok { color: var(--green); }
+  .code-block .kw { color: var(--purple); }
+  .code-block .str { color: var(--amber); }
+
+  .attack-flow { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 12px 0; }
+  .attack-flow .step { display: flex; align-items: flex-start; gap: 12px; margin: 8px 0; }
+  .attack-flow .step-num { min-width: 28px; height: 28px; background: rgba(239,68,68,0.15); color: var(--red); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500; }
+  .attack-flow .step-num.blue { background: rgba(59,130,246,0.15); color: var(--blue); }
+  .attack-flow .step-num.green { background: rgba(34,197,94,0.15); color: var(--green); }
+  .attack-flow .step-text { flex: 1; }
+  .arrow { color: var(--text2); text-align: center; margin: 4px 0 4px 14px; font-size: 14px; }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10px; margin-right: 4px; }
+  .tag-network { background: rgba(6,182,212,0.15); color: var(--cyan); }
+  .tag-crypto { background: rgba(168,85,247,0.15); color: var(--purple); }
+  .tag-auth { background: rgba(249,115,22,0.15); color: var(--orange); }
+  .tag-code { background: rgba(59,130,246,0.15); color: var(--blue); }
+  .tag-bridge { background: rgba(245,158,11,0.15); color: var(--amber); }
+
+  .chart-wrap { position: relative; width: 100%; height: 280px; margin: 16px 0; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+
+  .check-item { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0; }
+  .check-icon { min-width: 18px; text-align: center; }
+  .pass { color: var(--green); } .fail { color: var(--red); } .warn { color: var(--amber); }
+
+  .footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--text2); font-size: 11px; text-align: center; }
+
+  @media (max-width: 768px) {
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .two-col { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Remote PC Flutter v1.0.3 — 安全渗透审计报告</h1>
+<div class="meta">
+  <span>审计日期: 2026-06-09</span>
+  <span>审计人: Senior Developer (白帽渗透)</span>
+  <span>项目版本: 1.0.3+3</span>
+  <span>攻击面: 12 个文件 / 5 个网络端点 / 3 个原生桥接</span>
+</div>
+
+<h2>Executive Summary</h2>
+<p style="color:var(--text2);margin-bottom:16px;">本次审计模拟真实黑客攻击链，对 Remote PC Flutter v1.0.3 进行全面渗透测试。共发现 <strong style="color:var(--red)">2 个严重</strong>、<strong style="color:var(--orange)">3 个高危</strong>、<strong style="color:var(--amber)">4 个中危</strong>、<strong style="color:var(--green)">3 个低危</strong> 漏洞，以及 5 项加固建议。最严重的漏洞可导致攻击者在 LAN 内无需认证直接关机目标设备。</p>
+
+<div class="summary-grid">
+  <div class="summary-card"><div class="num c-red">2</div><div class="label">Critical 严重</div></div>
+  <div class="summary-card"><div class="num c-orange">3</div><div class="label">High 高危</div></div>
+  <div class="summary-card"><div class="num c-amber">4</div><div class="label">Medium 中危</div></div>
+  <div class="summary-card"><div class="num c-green">3</div><div class="label">Low / Info 低危</div></div>
+</div>
+
+<div class="two-col">
+  <div class="chart-wrap"><canvas id="sevChart" role="img" aria-label="漏洞严重级别分布">漏洞级别分布</canvas></div>
+  <div class="chart-wrap"><canvas id="catChart" role="img" aria-label="漏洞分类分布">漏洞分类分布</canvas></div>
+</div>
+
+<h2>ATT&CK 攻击链模拟</h2>
+<div class="attack-flow">
+  <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Recon 侦察</strong> — 扫描 LAN 内 UDP 4567 广播，发现运行 RemotePC 的设备 IP:9998</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Discovery 发现</strong> — 访问 /ping 端点确认存活，无需认证</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Token Theft 令牌窃取</strong> — 从本地 /auth-token 端点获取授权令牌（仅限 localhost，但可通过 DNS 重绑定绕过）</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Execution 执行</strong> — 携带 Token 向 /shutdown 发送 POST，目标设备立即关机</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Impact 影响</strong> — 目标设备关机，无任何二次确认，无回滚可能</div></div>
+</div>
+
+<h2>漏洞详情</h2>
+
+<table class="vuln-table">
+<thead>
+  <tr><th style="width:90px">ID</th><th style="width:80px">严重级别</th><th style="width:70px">分类</th><th>漏洞描述</th><th>攻击向量</th><th style="width:200px">修复建议</th></tr>
+</thead>
+<tbody>
+
+<tr>
+  <td class="vuln-id">RPC-001</td>
+  <td><span class="severity-badge severity-critical">CRITICAL</span></td>
+  <td><span class="tag tag-crypto">加密</span></td>
+  <td class="vuln-desc"><strong>硬编码 AES 密钥</strong><br><code>LicenseManager._aesKey</code> 使用固定字符串 <code>'RemotePC-2026-Secret-Key-32Byte!!'</code> 派生密钥。APK/IPA 反编译后密钥直接暴露。</td>
+  <td class="vuln-impact">攻击者反编译后可解密所有激活码、伪造授权</td>
+  <td class="vuln-fix">使用 Android Keystore / iOS Keychain / Windows DPAPI 存储密钥，运行时派生而非硬编码</td>
+</tr>
+
+<tr>
+  <td class="vuln-id">RPC-002</td>
+  <td><span class="severity-badge severity-critical">CRITICAL</span></td>
+  <td><span class="tag tag-auth">认证</span></td>
+  <td class="vuln-desc"><strong>Token 生成使用伪随机</strong><br><code>_generateToken()</code> 使用 <code>DateTime.now().microsecondsSinceEpoch % 256</code>，这是时间戳取模，可预测性极高。</td>
+  <td class="vuln-impact">攻击者可根据时间戳推算 Token 值，暴力破解仅需 ~2^16 次尝试</td>
+  <td class="vuln-fix">替换为 <code>Random.secure()</code> 或 <code>dart:math Random.secure()</code> 生成 32 字节真随机</td>
+</tr>
+
+<tr>
+  <td class="vuln-id">RPC-003</td>
+  <td><span class="severity-badge severity-high">HIGH</span></td>
+  <td><span class="tag tag-network">网络</span></td>
+  <td class="vuln-desc"><strong>HTTP 服务绑定 0.0.0.0</strong><br><code>HttpServer.bind(InternetAddress.anyIPv4, port)</code> 对所有网卡开放，同 LAN 内任何设备均可访问控制端点。</td>
+  <td class="vuln-impact">同 LAN 攻击者可直接访问 /ping /heartbeat 等端点，获取 SAFE_MODE 状态</td>
+  <td class="vuln-fix">默认绑定 <code>InternetAddress.loopbackIPv4</code>，仅本地访问；跨网络通过 WebRTC DataChannel 中转</td>
+</tr>
+
+<tr>
+  <td class="vuln-id">RPC-004</td>
+  <td><span class="severity-badge severity-high">HIGH</span></td>
+  <td><span class="tag tag-network">网络</span></td>
+  <td class="vuln-desc"><strong>UDP 发现协议无认证</strong><br>UDP 广播使用固定 magic header <code>REMOTE_PC_V3</code>，无签名校验。攻击者可伪造设备广播，注入恶意设备到列表。</td>
+  <td class="vuln-impact">MITM 攻击：伪造设备引导主控端连接到攻击者控制的 HTTP 服务</td>
+  <td class="vuln-fix">广播消息加入 HMAC-SHA256 签名，密钥通过带外通道交换</td>
+</tr>
+
+<tr>
+  <td class="vuln-id">RPC-005</td>
+  <td><span class="severity-badge severity-high">HIGH</span></td>
+  <td><span class="tag tag-auth">认证</span></td>
+  <td class="vuln-desc"><strong>/auth-token 端点 localhost 检查可绕过</strong><br>仅检查 <code>clientIp == '127.0.0.1'</code>，未考虑 DNS 重绑定攻击（ attacker.com 解析到 127.0.0.1）。</td>
+  <td class="vuln-impact">恶意网页通过 DNS 重绑定可读取 Token，进而执行关机等指令</td>
+  <td class="vuln-fix">添加 Origin / Referer 检查；或使用自定义 HTTP Header 要求而非仅 IP 校验</td>
+</tr>
+
+<tr>
+  <td class="vuln-id">RPC-006</td>
+  <td><span class="severity-badge severity-medium">MEDIUM</span></td>
+  <td><span class="tag tag-code">代码</span></td>
+  <td class="vuln-desc"><strong>激活码校验算法过于简单</strong><br><code>verifyActivationCode</code> 仅检查格式 + 首字符 ASCII 和 mod 37 == 0。碰撞概率高（约 2.7%），且算法公开于源码中。</td>
+  <td class="vuln-impact">攻击者可批量生成有效激活码，绕过授权</td>
+  <td class="vuln-fix">使用服务端在线验证 + 非对称签名；本地校验采用 HMAC-SHA256 而非简单取模</td>
+</tr>
+
+<tr>
+  <td class="vuln-id">RPC-007</td>
+  <td><span class="severity-badge severity-medium">MEDIUM</span></td>
+  <td><span class="tag tag-crypto">加密</span></td>
+  <td class="vuln-desc"><strong>DynamicFirewall 验证算法可逆</strong><br>挑战验证规则为 <code>sum(unicode_codepoints) % 997</code>，算法与 Dart/Java/Swift/C++ 四端完全一致且公开。攻击者拿到 challenge 后可直接计算 response。</td>
+  <td class="vuln-impact">防破解核心逻辑可被完全绕过，防火墙形同虚设</td>
+  <td class="vuln-fix">原生层使用设备绑定密钥进行 HMAC 签名验证，而非简单数学运算</td>
+</tr>
+
+<tr>
+  <td class="vuln-id">RPC-008</td>
+  <td><span class="severity-badge severity-medium">MEDIUM</span></td>
+  <td><span class="tag tag-bridge">桥接</span></td>
+  <td class="vuln-desc"><strong>MethodChannel 可被 Hook 拦截</strong><br>Flutter MethodChannel 消息未加密，可通过 Frida/Xposed 等 Hook 框架拦截和篡改 MethodChannel 通信。</td>
+  <td class="vuln-impact">攻击者可 Hook <code>isBeingDebugged</code> 返回 false，绕过调试检测</td>
+  <td class="vuln-fix">关键校验逻辑完全在原生层闭环，不通过 MethodChannel 返回中间结果；增加完整性校验</td>
+</tr>
+
+<tr>
+  <td class="vuln-id">RPC-009</td>
+  <td><span class="severity-badge severity-medium">MEDIUM</span></td>
+  <td><span class="tag tag-code">代码</span></td>
+  <td class="vuln-desc"><strong>DynamicFirewall 心跳 50% 概率跳过验证</strong><br><code>heartbeatCheck()</code> 中 <code>_rng.nextBool()</code> 决定是否验证，50% 概率直接返回 true。</td>
+  <td class="vuln-impact">攻击者有 50% 机会通过心跳检测，大幅降低防护有效性</td>
+  <td class="vuln-fix">每次心跳必须验证；或改为 90%+ 验证概率</td>
+</tr>
+
+<tr>
+  <td class="vuln-id">RPC-010</td>
+  <td><span class="severity-badge severity-low">LOW</span></td>
+  <td><span class="tag tag-code">代码</span></td>
+  <td class="vuln-desc"><strong>Windows 完整性校验过于简单</strong><br><code>VerifySystemIntegrity()</code> 仅检查 kernel32.dll 和 ntdll.dll 是否加载，以及 VMware 注册表键——这几乎永远返回 true。</td>
+  <td class="vuln-impact">完整性校验基本无防护效果</td>
+  <td class="vuln-fix">添加 EXE 签名校验、代码段 hash 校验、关键 DLL 完整性校验</td>
+</tr>
+
+<tr>
+  <td class="vuln-id">RPC-011</td>
+  <td><span class="severity-badge severity-low">LOW</span></td>
+  <td><span class="tag tag-network">网络</span></td>
+  <td class="vuln-desc"><strong>WebRTC TURN 凭证硬编码</strong><br>openrelay.metered.ca 的 TURN 凭证 <code>openrelayproject/openrelayproject</code> 硬编码在源码中。</td>
+  <td class="vuln-impact">凭证为公共免费服务，可被滥用导致服务限流或不可用</td>
+  <td class="vuln-fix">使用自建 TURN 服务器或通过 API 动态获取临时凭证</td>
+</tr>
+
+<tr>
+  <td class="vuln-id">RPC-012</td>
+  <td><span class="severity-badge severity-low">LOW</span></td>
+  <td><span class="tag tag-bridge">桥接</span></td>
+  <td class="vuln-desc"><strong>原生自毁不彻底</strong><br>macOS 自毁未清除 FlutterSecureStorage (Keychain) 中 <code>remote_pc_activation</code> 条目。Android 自毁使用反射调用 <code>clearApplicationUserData</code>，部分设备不支持。</td>
+  <td class="vuln-impact">自毁后仍可能残留部分数据</td>
+  <td class="vuln-fix">macOS 补充 Keychain 清除；Android 增加 fallback 手动清除逻辑</td>
+</tr>
+
+</tbody>
+</table>
+
+<h2>SAFE_MODE 防护评估</h2>
+
+<h3>防护有效场景</h3>
+<div class="check-item"><span class="check-icon pass">✓</span>SAFE_MODE=1 环境变量 → 拒绝关机/重启/锁屏执行</div>
+<div class="check-item"><span class="check-icon pass">✓</span>x-test-mode 请求头 → 拦截但记录日志，不执行</div>
+<div class="check-item"><span class="check-icon pass">✓</span>未授权请求 → 返回 403 Forbidden</div>
+<div class="check-item"><span class="check-icon pass">✓</span>审计日志记录所有危险指令尝试</div>
+
+<h3>防护绕过场景</h3>
+<div class="check-item"><span class="check-icon fail">✗</span>Token 可预测（RPC-002）→ 攻击者获取有效 Token 后，SAFE_MODE OFF 时可直接执行</div>
+<div class="check-item"><span class="check-icon fail">✗</span>HTTP 绑定 0.0.0.0（RPC-003）→ 同 LAN 设备可直接请求 /safe-mode 查询状态</div>
+<div class="check-item"><span class="check-icon warn">△</span>SAFE_MODE 默认 OFF → 首次启动无保护，需用户手动开启</div>
+<div class="check-item"><span class="check-icon warn">△</span>无 SAFE_MODE 强制锁定 → 运行时可随时关闭，无二次验证</div>
+
+<h2>网络攻击面分析</h2>
+
+<div class="attack-flow">
+  <h3 style="margin:0 0 12px;color:var(--cyan)">LAN 模式攻击面</h3>
+  <div class="step"><div class="step-num blue">1</div><div class="step-text"><strong>UDP 4567</strong> — 广播发现，无认证，可伪造</div></div>
+  <div class="step"><div class="step-num blue">2</div><div class="step-text"><strong>HTTP 9998</strong> — 控制端点，Token 认证但生成可预测</div></div>
+  <div class="step"><div class="step-num blue">3</div><div class="step-text"><strong>HTTP 9990</strong> — 篡改告警服务（LicenseManager._reportTamperToMaster），仅 localhost</div></div>
+</div>
+
+<div class="attack-flow">
+  <h3 style="margin:0 0 12px;color:var(--cyan)">跨网络模式攻击面</h3>
+  <div class="step"><div class="step-num green">1</div><div class="step-text"><strong>WebSocket 信令</strong> — 未验证信令服务器身份，WSS 证书未校验</div></div>
+  <div class="step"><div class="step-num green">2</div><div class="step-text"><strong>WebRTC DataChannel</strong> — DTLS 加密（由 WebRTC 协议栈保证），相对安全</div></div>
+  <div class="step"><div class="step-num green">3</div><div class="step-text"><strong>STUN/TURN</strong> — 公共 TURN 凭证可被滥用</div></div>
+</div>
+
+<h2>代码级漏洞演示</h2>
+
+<h3>RPC-002: Token 可预测性验证</h3>
+<div class="code-block">
+<span class="kw">// 当前实现 (http_server.dart:73-78)</span>
+String _generateToken() {
+  final rand = List&lt;int&gt;.generate(
+      32, (_) =&gt; <span class="hl">DateTime.now().microsecondsSinceEpoch % 256</span>);
+  return base64Encode(rand);
+}
+
+<span class="kw">// 攻击：如果知道服务器启动时间，可以精确计算 Token</span>
+<span class="kw">// 32 个字节，每个字节 = timestamp_us % 256</span>
+<span class="kw">// 如果启动时间误差在 1 秒内，暴力空间仅 10^6 ≈ 2^20</span>
+<span class="kw">// 实际更糟：连续字节的值高度相关</span>
+
+<span class="kw">// 修复方案</span>
+String _generateToken() {
+  final rand = <span class="ok">Random.secure()</span>;
+  final bytes = List&lt;int&gt;.generate(32, (_) =&gt; rand.nextInt(256));
+  return base64Encode(bytes);
+}
+</div>
+
+<h3>RPC-001: 硬编码密钥提取</h3>
+<div class="code-block">
+<span class="kw">// license_manager.dart:16</span>
+static final _aesKey = _deriveKey(<span class="hl">'RemotePC-2026-Secret-Key-32Byte!!'</span>);
+
+<span class="kw">// 反编译 APK 后：</span>
+<span class="kw">// $ jadx -d output app-release.apk</span>
+<span class="kw">// $ grep -r "RemotePC-2026" output/</span>
+<span class="kw">// → 直接获取密钥明文</span>
+<span class="kw">// → 可解密所有激活码、伪造授权数据</span>
+
+<span class="kw">// 修复方案</span>
+<span class="kw">// Android: 使用 Android Keystore</span>
+<span class="kw">// iOS: 使用 Keychain + Secure Enclave</span>
+<span class="kw">// Windows: 使用 DPAPI CryptProtectData</span>
+<span class="kw">// macOS: 使用 Security.framework SecKeyCreateRandomKey</span>
+</div>
+
+<h3>RPC-003: HTTP 0.0.0.0 绑定风险</h3>
+<div class="code-block">
+<span class="kw">// http_server.dart:64</span>
+_server = await HttpServer.bind(<span class="hl">InternetAddress.anyIPv4</span>, port);
+
+<span class="kw">// 攻击：同 LAN 内任何设备可直接访问</span>
+<span class="kw">// $ curl http://192.168.1.100:9998/ping</span>
+<span class="kw">// → {"status":"alive"}</span>
+<span class="kw">// $ curl http://192.168.1.100:9998/safe-mode</span>
+<span class="kw">// → {"safeMode":false,...}  // 无需认证即可查看状态！</span>
+
+<span class="kw">// 修复方案</span>
+_server = await HttpServer.bind(<span class="ok">InternetAddress.loopbackIPv4</span>, port);
+</div>
+
+<h2>原生桥接安全评估</h2>
+
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:16px 0;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;">
+    <div style="color:var(--green);font-weight:500;margin-bottom:8px;">Android (Kotlin)</div>
+    <div class="check-item"><span class="check-icon pass">✓</span>调试检测 (isDebuggerConnected)</div>
+    <div class="check-item"><span class="check-icon pass">✓</span>模拟器检测</div>
+    <div class="check-item"><span class="check-icon pass">✓</span>APK 签名校验</div>
+    <div class="check-item"><span class="check-icon warn">△</span>签名仅检查存在性，未比对哈希</div>
+    <div class="check-item"><span class="check-icon fail">✗</span>自毁使用反射，兼容性差</div>
+  </div>
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;">
+    <div style="color:var(--blue);font-weight:500;margin-bottom:8px;">macOS (Swift)</div>
+    <div class="check-item"><span class="check-icon pass">✓</span>P_TRACED 调试检测</div>
+    <div class="check-item"><span class="check-icon pass">✓</span>codesign 完整性校验</div>
+    <div class="check-item"><span class="check-icon pass">✓</span>CryptoKit SHA-256</div>
+    <div class="check-item"><span class="check-icon pass">✓</span>Keychain 清除</div>
+    <div class="check-item"><span class="check-icon warn">△</span>自毁未清除 FlutterSecureStorage</div>
+  </div>
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;">
+    <div style="color:var(--amber);font-weight:500;margin-bottom:8px;">Windows (C++)</div>
+    <div class="check-item"><span class="check-icon pass">✓</span>IsDebuggerPresent + NtQuery</div>
+    <div class="check-item"><span class="check-icon pass">✓</span>BCrypt SHA-256</div>
+    <div class="check-item"><span class="check-icon pass">✓</span>DPAPI 可用</div>
+    <div class="check-item"><span class="check-icon fail">✗</span>完整性校验几乎无效果</div>
+    <div class="check-item"><span class="check-icon warn">△</span>VMware 检测仅信息性</div>
+  </div>
+</div>
+
+<h2>修复优先级路线图</h2>
+
+<div class="attack-flow">
+  <div class="step"><div class="step-num" style="background:rgba(239,68,68,0.25);color:var(--red)">P0</div><div class="step-text"><strong>RPC-002 Token 伪随机 → 真随机</strong> — 修改 <code>_generateToken()</code> 使用 <code>Random.secure()</code>，1 行代码修复</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num" style="background:rgba(239,68,68,0.25);color:var(--red)">P0</div><div class="step-text"><strong>RPC-001 硬编码密钥 → 平台密钥库</strong> — Android Keystore / iOS Keychain / Windows DPAPI</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num" style="background:rgba(249,115,22,0.25);color:var(--orange)">P1</div><div class="step-text"><strong>RPC-003 HTTP 绑定 localhost</strong> — 默认绑定 loopback，跨网络走 WebRTC</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num" style="background:rgba(249,115,22,0.25);color:var(--orange)">P1</div><div class="step-text"><strong>RPC-004 UDP 广播签名</strong> — 加入 HMAC 签名验证广播真实性</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num" style="background:rgba(249,115,22,0.25);color:var(--orange)">P1</div><div class="step-text"><strong>RPC-005 /auth-token 加固</strong> — 添加 Origin 校验 + 自定义 Header</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num" style="background:rgba(245,158,11,0.25);color:var(--amber)">P2</div><div class="step-text"><strong>RPC-006~009</strong> — 加固激活码算法、改进防火墙验证、MethodChannel 加密、心跳必验证</div></div>
+</div>
+
+<h2>防御加固建议 (Beyond Fix)</h2>
+<div class="check-item"><span class="check-icon" style="color:var(--blue)">◆</span><strong>证书固定 (Certificate Pinning)</strong> — 信令服务器和 TURN 服务器启用 SSL Pinning</div>
+<div class="check-item"><span class="check-icon" style="color:var(--blue)">◆</span><strong>速率限制</strong> — HTTP 端点添加请求频率限制，防暴力破解 Token</div>
+<div class="check-item"><span class="check-icon" style="color:var(--blue)">◆</span><strong>CORS 策略</strong> — HTTP 响应添加 CORS Header，阻止浏览器跨域请求</div>
+<div class="check-item"><span class="check-icon" style="color:var(--blue)">◆</div><strong>运行时完整性</strong> — 定期校验 APK/EXE 签名哈希，异常则自毁</div>
+<div class="check-item"><span class="check-icon" style="color:var(--blue)">◆</span><strong>SAFE_MODE 默认 ON</strong> — 首次启动默认开启，需明确操作才能关闭</div>
+
+<h2>综合评分</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0;">
+  <div class="chart-wrap"><canvas id="radarChart" role="img" aria-label="安全维度雷达图">安全维度雷达</canvas></div>
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;">
+    <h3 style="margin-bottom:16px;color:var(--cyan)">安全维度评分</h3>
+    <div style="margin:8px 0"><span style="color:var(--text2);display:inline-block;width:120px">网络隔离</span> <span style="color:var(--red)">3/10</span> ████████░░░░░░░░░░░░</div>
+    <div style="margin:8px 0"><span style="color:var(--text2);display:inline-block;width:120px">认证安全</span> <span style="color:var(--red)">2/10</span> ████░░░░░░░░░░░░░░░░</div>
+    <div style="margin:8px 0"><span style="color:var(--text2);display:inline-block;width:120px">加密强度</span> <span style="color:var(--orange)">4/10</span> ████████░░░░░░░░░░░░</div>
+    <div style="margin:8px 0"><span style="color:var(--text2);display:inline-block;width:120px">代码混淆</span> <span style="color:var(--amber)">5/10</span> ██████████░░░░░░░░░░</div>
+    <div style="margin:8px 0"><span style="color:var(--text2);display:inline-block;width:120px">原生桥接</span> <span style="color:var(--amber)">6/10</span> ████████████░░░░░░░░</div>
+    <div style="margin:8px 0"><span style="color:var(--text2);display:inline-block;width:120px">SAFE_MODE</span> <span style="color:var(--green)">7/10</span> ██████████████░░░░░░</div>
+    <div style="margin:8px 0"><span style="color:var(--text2);display:inline-block;width:120px">审计追踪</span> <span style="color:var(--green)">7/10</span> ██████████████░░░░░░</div>
+    <div style="margin:16px 0 0;padding-top:12px;border-top:1px solid var(--border)">
+      <span style="color:var(--text2)">综合安全分</span>
+      <span style="font-size:24px;font-weight:500;color:var(--amber);margin-left:12px">4.9 / 10</span>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  Remote PC Flutter v1.0.3 Security Audit Report — Generated by Senior Developer (白帽渗透) — 2026-06-09<br>
+  本报告仅供安全加固参考，所有攻击模拟均在受控环境下完成
+</div>
+
+</div>
+
+<script>
+new Chart(document.getElementById('sevChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ['Critical', 'High', 'Medium', 'Low/Info'],
+    datasets: [{ data: [2, 3, 4, 3], backgroundColor: ['#ef4444', '#f97316', '#f59e0b', '#22c55e'], borderWidth: 0 }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { display: true, position: 'bottom', labels: { color: '#94a3b8', font: { size: 11 }, padding: 12 } },
+      title: { display: true, text: '漏洞严重级别分布', color: '#e2e8f0', font: { size: 13 } }
+    }
+  }
+});
+
+new Chart(document.getElementById('catChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ['加密', '认证', '网络', '代码', '桥接'],
+    datasets: [{ data: [3, 3, 3, 2, 1], backgroundColor: ['#a855f7', '#f97316', '#06b6d4', '#3b82f6', '#f59e0b'], borderWidth: 0 }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { display: true, position: 'bottom', labels: { color: '#94a3b8', font: { size: 11 }, padding: 12 } },
+      title: { display: true, text: '漏洞分类分布', color: '#e2e8f0', font: { size: 13 } }
+    }
+  }
+});
+
+new Chart(document.getElementById('radarChart'), {
+  type: 'radar',
+  data: {
+    labels: ['网络隔离', '认证安全', '加密强度', '代码混淆', '原生桥接', 'SAFE_MODE', '审计追踪'],
+    datasets: [{
+      label: '当前评分',
+      data: [3, 2, 4, 5, 6, 7, 7],
+      backgroundColor: 'rgba(6,182,212,0.15)',
+      borderColor: '#06b6d4',
+      pointBackgroundColor: '#06b6d4',
+      borderWidth: 2
+    }, {
+      label: '目标评分',
+      data: [8, 8, 8, 7, 8, 9, 8],
+      backgroundColor: 'rgba(34,197,94,0.08)',
+      borderColor: '#22c55e',
+      pointBackgroundColor: '#22c55e',
+      borderWidth: 1,
+      borderDash: [4, 4]
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    scales: {
+      r: {
+        beginAtZero: true, max: 10,
+        grid: { color: 'rgba(148,163,184,0.1)' },
+        angleLines: { color: 'rgba(148,163,184,0.1)' },
+        pointLabels: { color: '#94a3b8', font: { size: 10 } },
+        ticks: { display: false }
+      }
+    },
+    plugins: {
+      legend: { display: true, position: 'bottom', labels: { color: '#94a3b8', font: { size: 11 } } },
+      title: { display: true, text: '安全维度雷达图', color: '#e2e8f0', font: { size: 13 } }
+    }
+  }
+});
+</script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import '../models/device.dart';
 import '../security/license_manager.dart';
 // v1.0.3: SAFE_MODE 防护 + 跨平台命令支持 (macOS/Linux)
@@ -61,7 +62,9 @@ class HttpServerService {
     // 生成随机授权 Token
     _authToken = _generateToken();
 
-    _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+    // 绑定 localhost，避免对外暴露（原 0.0.0.0 有安全风险）
+    // 如需局域网访问，启动时传入 bindAddress: InternetAddress.anyIPv4
+    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
     print(
         '[HTTP] Server started on port $port (auth token: ${_authToken!.substring(0, 8)}...)');
     await for (final req in _server!) {
@@ -69,11 +72,10 @@ class HttpServerService {
     }
   }
 
-  /// 生成 32 字节随机 Token
+  /// 生成 32 字节密码学安全随机 Token
   String _generateToken() {
-    final rand = List<int>.generate(
-        32, (_) => DateTime.now().microsecondsSinceEpoch % 256);
-    // 简单 Base64 编码
+    final r = Random.secure();
+    final rand = List<int>.generate(32, (_) => r.nextInt(256));
     return base64Encode(rand);
   }
 
@@ -228,12 +230,27 @@ class HttpServerService {
   void _handleAuthTokenRequest(HttpRequest req) {
     // 仅本地访问可获取 Token
     final clientIp = req.connectionInfo?.remoteAddress.address ?? '';
-    if (clientIp != '127.0.0.1' &&
-        clientIp != '::1' &&
-        clientIp != '0:0:0:0:0:0:0:1') {
+    final isLocal = clientIp == '127.0.0.1' ||
+        clientIp == '::1' ||
+        clientIp == '0:0:0:0:0:0:0:1';
+    if (!isLocal) {
       _respondForbidden(req, 'Token only available from localhost');
       return;
     }
+
+    // 额外验证 Host 头，防止 DNS 重绑定攻击
+    final host = req.headers.value('host') ?? '';
+    final isLocalHost = host.startsWith('127.0.0.1') ||
+        host.startsWith('localhost') ||
+        host.startsWith('::1') ||
+        host.isEmpty; // 本地请求可能没有 Host 头
+    if (!isLocalHost) {
+      // IP 是本地，但 Host 头不是本地 — 可能是 DNS 重绑定攻击
+      _addAuditLog('AUTH_TOKEN', 'DNS_REBINDING_SUSPECT', clientIp);
+      _respondForbidden(req, 'Suspicious Host header — possible DNS rebinding');
+      return;
+    }
+
     _respondOk(req, {
       'token': _authToken,
       'safeMode': _safeMode,

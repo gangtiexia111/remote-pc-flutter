@@ -87,8 +87,8 @@ class _SecurityScreenState extends State<SecurityScreen> {
   }
 
   /// 执行一次心跳校验
-  void _performHeartbeat() {
-    final result = _firewall.heartbeatCheck();
+  Future<void> _performHeartbeat() async {
+    final result = await _firewall.heartbeatCheck();
     final state = _firewall.getDynamicState();
 
     setState(() {
@@ -121,9 +121,9 @@ class _SecurityScreenState extends State<SecurityScreen> {
   }
 
   /// 手动触发挑战验证
-  void _manualChallenge() {
+  Future<void> _manualChallenge() async {
     final challenge = _firewall.generateChallenge();
-    final response = _firewall.verifyResponse(challenge, '');
+    final response = await _firewall.verifyResponse(challenge, '');
     setState(() {
       _lastChallenge = challenge;
       _lastVerifyResult =

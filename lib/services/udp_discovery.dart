@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import '../models/device.dart';
 
 /// UDP 设备发现服务 — 对应原 Java 版 UdpDiscovery.java
@@ -13,6 +14,8 @@ class UdpDiscoveryService {
   final _devices = <String, Device>{};
   final _callbacks = <Function(Device)>[];
   bool _running = false;
+  final _seenNonces = <int>{};
+  final _rng = Random.secure();
 
   Map<String, Device> get devices => Map.unmodifiable(_devices);
 
@@ -35,18 +38,21 @@ class UdpDiscoveryService {
   Future<void> sendDiscoveryBroadcast(Device self) async {
     final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
     socket.broadcastEnabled = true;
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final nonce = _rng.nextInt(0xFFFFFFFF);
     final msg = jsonEncode({
       'header': _magicHeader,
       'id': self.id,
       'name': self.name,
       'ip': self.ip,
       'port': self.port,
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'timestamp': timestamp,
+      'nonce': nonce,
     });
     final data = utf8.encode(msg);
     _socket?.send(data, InternetAddress(_broadcastAddress), _discoveryPort);
     socket.close();
-    print('[UDP] Broadcast sent');
+    print('[UDP] Broadcast sent (ts=$timestamp, nonce=$nonce)');
   }
 
   void _onPacket(RawSocketEvent event) {
@@ -56,6 +62,23 @@ class UdpDiscoveryService {
     try {
       final msg = jsonDecode(utf8.decode(dg.data)) as Map<String, dynamic>;
       if (msg['header'] != _magicHeader) return;
+
+      // 时间戳验证（10秒内有效，防重放攻击）
+      final timestamp = msg['timestamp'] as int? ?? 0;
+      if ((DateTime.now().millisecondsSinceEpoch - timestamp).abs() > 10000) {
+        print('[UDP] Drop expired packet from ${dg.address.address}');
+        return;
+      }
+
+      // Nonce 去重（防重放攻击）
+      final nonce = msg['nonce'] as int? ?? 0;
+      if (_seenNonces.contains(nonce)) {
+        print('[UDP] Drop replayed packet from ${dg.address.address}');
+        return;
+      }
+      _seenNonces.add(nonce);
+      if (_seenNonces.length > 1000) _seenNonces.remove(_seenNonces.first);
+
       final id = msg['id'] as String;
       if (_devices.containsKey(id)) {
         _devices[id]!.markAlive();
@@ -70,7 +93,9 @@ class UdpDiscoveryService {
       for (final cb in _callbacks) {
         cb(_devices[id]!);
       }
-    } catch (_) {}
+    } catch (e) {
+      print('[UDP] Packet parse error: $e');
+    }
   }
 
   void addCallback(Function(Device) cb) => _callbacks.add(cb);
