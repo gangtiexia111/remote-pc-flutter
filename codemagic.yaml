@@ -1,10 +1,10 @@
 workflows:
   # ============================================
   # iOS 构建（无签名，生成 .app）
-  # v1.0.3: 添加 Webhook 触发配置
+  # v1.0.3: Codemagic cloud build
   # ============================================
   ios-build:
-    name: iOS Build
+    name: iOS Build (no signing)
     instance_type: mac_mini_m2
     max_build_duration: 60
     triggering:
@@ -23,8 +23,12 @@ workflows:
       vars:
         SAFE_MODE: "1"
     scripts:
+      - name: Set up local properties
+        script: echo "flutter.minSdkVersion=21" > android/local.properties
       - name: Install dependencies
         script: flutter pub get
+      - name: Flutter analyze
+        script: flutter analyze --no-fatal-infos
       - name: Build iOS (no code signing)
         script: flutter build ios --release --no-codesign
     artifacts:
@@ -32,11 +36,11 @@ workflows:
     publishing:
       email:
         recipients:
-          - dev@remote-pc.app
+          - 2093098597@qq.com
 
   # ============================================
   # macOS 构建
-  # v1.0.3: 添加 Webhook 触发 + SAFE_MODE
+  # v1.0.3: Codemagic cloud build + CryptoKit
   # ============================================
   macos-build:
     name: macOS Build
@@ -58,8 +62,12 @@ workflows:
       vars:
         SAFE_MODE: "1"
     scripts:
+      - name: Set up local properties
+        script: echo "flutter.minSdkVersion=21" > android/local.properties
       - name: Install dependencies
         script: flutter pub get
+      - name: Flutter analyze
+        script: flutter analyze --no-fatal-infos
       - name: Build macOS release
         script: flutter build macos --release
     artifacts:
@@ -67,11 +75,46 @@ workflows:
     publishing:
       email:
         recipients:
-          - dev@remote-pc.app
+          - 2093098597@qq.com
+
+  # ============================================
+  # Android 构建（APK）
+  # v1.0.3: Codemagic cloud build
+  # ============================================
+  android-build:
+    name: Android Build
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: 'main'
+          include: true
+      cancel_previous_builds: true
+    environment:
+      flutter: stable
+      vars:
+        SAFE_MODE: "1"
+    scripts:
+      - name: Set up local properties
+        script: echo "flutter.minSdkVersion=21" > android/local.properties
+      - name: Install dependencies
+        script: flutter pub get
+      - name: Flutter analyze
+        script: flutter analyze --no-fatal-infos
+      - name: Build Android APK
+        script: flutter build apk --release
+    artifacts:
+      - build/**/outputs/**/*.apk
+    publishing:
+      email:
+        recipients:
+          - 2093098597@qq.com
 
   # ============================================
   # Linux 构建
-  # v1.0.3: 添加 Webhook 触发 + SAFE_MODE
+  # v1.0.3: Codemagic cloud build
   # ============================================
   linux-build:
     name: Linux Build
@@ -98,6 +141,8 @@ workflows:
           sudo apt-get install -y ninja-build libgtk-3-dev
       - name: Install Dart dependencies
         script: flutter pub get
+      - name: Flutter analyze
+        script: flutter analyze --no-fatal-infos
       - name: Build Linux release
         script: flutter build linux --release
     artifacts:
@@ -105,35 +150,4 @@ workflows:
     publishing:
       email:
         recipients:
-          - dev@remote-pc.app
-
-  # ============================================
-  # Android 构建（APK）
-  # v1.0.3: 新增 Android 构建流程
-  # ============================================
-  android-build:
-    name: Android Build
-    instance_type: mac_mini_m2
-    max_build_duration: 60
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: 'main'
-          include: true
-      cancel_previous_builds: true
-    environment:
-      flutter: stable
-      vars:
-        SAFE_MODE: "1"
-    scripts:
-      - name: Install dependencies
-        script: flutter pub get
-      - name: Build Android APK
-        script: flutter build apk --release
-    artifacts:
-      - build/**/outputs/**/*.apk
-    publishing:
-      email:
-        recipients:
-          - dev@remote-pc.app
+          - 2093098597@qq.com
