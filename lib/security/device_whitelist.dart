@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'secure_storage_validator.dart';
 
 /// 设备配对白名单 — 只允许已配对的设备连接主端
 ///
@@ -9,8 +11,12 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// 3. 后续连接直接放行白名单设备
 /// 4. 支持手动移除设备
 /// 5. 白名单存储在 FlutterSecureStorage（各平台安全存储）
+/// 6. V5-03 修复：并发操作互斥锁，防止数据覆盖
 class DeviceWhitelist {
   static const String _whitelistKey = 'remote_pc_device_whitelist';
+
+  /// 白名单最大设备数（防无限增长）
+  static const int _maxDevices = 16;
 
   /// 白名单条目
   /// [deviceId] 设备唯一标识
@@ -27,11 +33,36 @@ class DeviceWhitelist {
   final FlutterSecureStorage _storage;
   List<Map<String, dynamic>> _devices = [];
 
+  /// 并发操作互斥锁（V5-03 修复：防止多个 await 同时修改 _devices）
+  Completer<void>? _writeLock;
+
   DeviceWhitelist({FlutterSecureStorage? storage})
       : _storage = storage ?? const FlutterSecureStorage();
 
+  /// 使用互斥锁执行写操作（防止并发数据覆盖）
+  Future<T> _withLock<T>(Future<T> Function() fn) async {
+    // 等待之前的写操作完成
+    while (_writeLock != null) {
+      await _writeLock!.future;
+    }
+    _writeLock = Completer<void>();
+    try {
+      return await fn();
+    } finally {
+      _writeLock!.complete();
+      _writeLock = null;
+    }
+  }
+
   /// 加载白名单（从安全存储读取）
+  /// V5-05：检测 Linux 安全存储降级
   Future<void> load() async {
+    // 检查存储安全性
+    final warning = await SecureStorageValidator.validate(storage: _storage);
+    if (warning != null) {
+      print('[Whitelist] $warning');
+    }
+
     final raw = await _storage.read(key: _whitelistKey);
     if (raw != null && raw.isNotEmpty) {
       try {
@@ -72,9 +103,20 @@ class DeviceWhitelist {
     return false;
   }
 
-  /// 常量时间字符串比较（防时序攻击）
+  /// 常量时间字符串比较（防时序攻击 + 长度侧信道 V5-01 修复）
+  /// 即使长度不同，也执行相同次数的循环，防止通过时间差泄露长度信息
   bool _constantTimeEqual(String a, String b) {
-    if (a.length != b.length) return false;
+    if (a.length != b.length) {
+      // 仍执行完整循环（用较长字符串的长度），防止长度侧信道
+      final maxLen = a.length > b.length ? a.length : b.length;
+      int dummy = 1; // 预设为非零，确保最后返回 false
+      for (int i = 0; i < maxLen; i++) {
+        final ac = i < a.length ? a.codeUnitAt(i) : 0;
+        final bc = i < b.length ? b.codeUnitAt(i) : 0;
+        dummy |= ac ^ bc;
+      }
+      return false; // 长度不同 → 一定不相等
+    }
     int result = 0;
     for (int i = 0; i < a.length; i++) {
       result |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
@@ -83,45 +125,58 @@ class DeviceWhitelist {
   }
 
   /// 添加设备到白名单（配对成功后调用）
+  /// V5-03 修复：使用互斥锁防止并发覆盖
   Future<bool> addDevice({
     required String deviceId,
     String? fingerprint,
     required String name,
   }) async {
-    // 检查是否已存在
-    if (isAllowed(deviceId, fingerprint: fingerprint)) return true;
+    return _withLock(() async {
+      // 检查是否已存在
+      if (isAllowed(deviceId, fingerprint: fingerprint)) return true;
 
-    _devices.add({
-      kDeviceId: deviceId,
-      kFingerprint: fingerprint ?? '',
-      kName: name,
-      kPairedAt: DateTime.now().millisecondsSinceEpoch,
-      kLastSeen: DateTime.now().millisecondsSinceEpoch,
+      // 检查设备数上限
+      if (_devices.length >= _maxDevices) {
+        print('[Whitelist] ❌ Max devices ($_maxDevices) reached');
+        return false;
+      }
+
+      _devices.add({
+        kDeviceId: deviceId,
+        kFingerprint: fingerprint ?? '',
+        kName: name,
+        kPairedAt: DateTime.now().millisecondsSinceEpoch,
+        kLastSeen: DateTime.now().millisecondsSinceEpoch,
+      });
+      await _save();
+      return true;
     });
-    await _save();
-    return true;
   }
 
   /// 更新设备最后在线时间
   Future<void> updateLastSeen(String deviceId) async {
-    for (final d in _devices) {
-      if (d[kDeviceId] == deviceId) {
-        d[kLastSeen] = DateTime.now().millisecondsSinceEpoch;
-        break;
+    await _withLock(() async {
+      for (final d in _devices) {
+        if (d[kDeviceId] == deviceId) {
+          d[kLastSeen] = DateTime.now().millisecondsSinceEpoch;
+          break;
+        }
       }
-    }
-    await _save();
+      await _save();
+    });
   }
 
   /// 移除设备（取消配对）
   Future<bool> removeDevice(String deviceId) async {
-    final before = _devices.length;
-    _devices.removeWhere((d) => d[kDeviceId] == deviceId);
-    if (_devices.length < before) {
-      await _save();
-      return true;
-    }
-    return false;
+    return _withLock(() async {
+      final before = _devices.length;
+      _devices.removeWhere((d) => d[kDeviceId] == deviceId);
+      if (_devices.length < before) {
+        await _save();
+        return true;
+      }
+      return false;
+    });
   }
 
   /// 获取所有已配对设备

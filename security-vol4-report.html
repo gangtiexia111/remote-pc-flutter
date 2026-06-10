@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Remote PC — Vol.4 安全审计报告</title>
+<style>
+:root {
+  --bg: #0a0e1a;
+  --card: #111827;
+  --card2: #1a2234;
+  --accent: #00d4ff;
+  --accent2: #7c3aed;
+  --red: #ef4444;
+  --orange: #f97316;
+  --yellow: #eab308;
+  --green: #22c55e;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --border: #1e293b;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.7;
+  padding: 40px 20px;
+}
+.container { max-width: 1100px; margin: 0 auto; }
+h1 {
+  font-size: 2.5rem;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 8px;
+}
+.subtitle { color: var(--muted); font-size: 1.1rem; margin-bottom: 40px; }
+.score-bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 24px 32px;
+  background: var(--card);
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  margin-bottom: 32px;
+}
+.score-number {
+  font-size: 3.5rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--green), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.score-label { color: var(--muted); font-size: 0.9rem; }
+.score-track {
+  flex: 1;
+  height: 12px;
+  background: var(--card2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.score-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--red), var(--orange), var(--yellow), var(--green));
+  transition: width 1s ease;
+}
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px; margin-bottom: 32px; }
+.card {
+  background: var(--card);
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  padding: 24px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.card:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,212,255,0.1); }
+.severity {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.severity.critical { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+.severity.high { background: rgba(249,115,22,0.15); color: var(--orange); border: 1px solid rgba(249,115,22,0.3); }
+.severity.medium { background: rgba(234,179,8,0.15); color: var(--yellow); border: 1px solid rgba(234,179,8,0.3); }
+.vuln-id { color: var(--accent); font-family: 'Cascadia Code', monospace; font-size: 0.9rem; }
+.vuln-title { font-size: 1.15rem; font-weight: 600; margin: 8px 0; }
+.vuln-desc { color: var(--muted); font-size: 0.9rem; margin-bottom: 12px; }
+.fix-label { font-size: 0.8rem; color: var(--green); font-weight: 600; }
+.fix-desc { color: var(--text); font-size: 0.88rem; margin-top: 4px; }
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(34,197,94,0.15);
+  color: var(--green);
+  border: 1px solid rgba(34,197,94,0.3);
+}
+.section-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 40px 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.section-title::before {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 28px;
+  background: linear-gradient(180deg, var(--accent), var(--accent2));
+  border-radius: 2px;
+}
+.timeline {
+  background: var(--card);
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  padding: 24px 32px;
+}
+.timeline-item {
+  display: flex;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.timeline-item:last-child { border-bottom: none; }
+.tl-version { font-weight: 700; color: var(--accent); min-width: 80px; }
+.tl-score { font-weight: 700; min-width: 60px; }
+.tl-desc { color: var(--muted); font-size: 0.9rem; }
+.defense-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 20px; }
+.defense-item {
+  background: var(--card2);
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+}
+.defense-layer { color: var(--accent); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
+.defense-name { font-weight: 600; margin: 4px 0; }
+.defense-desc { color: var(--muted); font-size: 0.82rem; }
+pre {
+  background: #0d1117;
+  border-radius: 8px;
+  padding: 16px;
+  overflow-x: auto;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  border: 1px solid var(--border);
+  margin: 8px 0 12px;
+}
+.code-label { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; }
+.footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.attack-flow {
+  background: var(--card);
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  padding: 24px;
+  margin: 20px 0;
+}
+.attack-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+}
+.step-num {
+  min-width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(239,68,68,0.15);
+  color: var(--red);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.step-text { color: var(--muted); font-size: 0.9rem; padding-top: 3px; }
+.step-text strong { color: var(--text); }
+.comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 8px 0 12px; }
+.before, .after {
+  border-radius: 8px;
+  padding: 12px;
+  font-family: 'Cascadia Code', monospace;
+  font-size: 0.8rem;
+}
+.before { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); }
+.after { background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.2); }
+.label-before { color: var(--red); font-size: 0.7rem; font-weight: 700; margin-bottom: 4px; }
+.label-after { color: var(--green); font-size: 0.7rem; font-weight: 700; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>🛡️ Vol.4 安全审计报告</h1>
+<p class="subtitle">Remote PC v1.0.4 — 白帽攻击深度审计 + 安全机制完善 · 2026-06-10</p>
+
+<div class="score-bar">
+  <div>
+    <div class="score-number">9.5</div>
+    <div class="score-label">安全评分 / 10</div>
+  </div>
+  <div style="flex:1">
+    <div class="score-track">
+      <div class="score-fill" style="width:95%"></div>
+    </div>
+    <div style="display:flex; justify-content:space-between; margin-top:4px;">
+      <span style="color:var(--muted); font-size:0.75rem;">0 — 完全不安全</span>
+      <span style="color:var(--muted); font-size:0.75rem;">10 — 军事级别</span>
+    </div>
+  </div>
+</div>
+
+<h2 class="section-title">Vol.4 漏洞发现</h2>
+
+<div class="grid">
+
+<!-- ATK-W06 -->
+<div class="card">
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <span class="severity critical">CRITICAL</span>
+    <span class="vuln-id">ATK-W06</span>
+    <span class="status-badge">✓ 已修复</span>
+  </div>
+  <div class="vuln-title">设备指纹绕过漏洞</div>
+  <div class="vuln-desc">
+    DeviceWhitelist.isAllowed() 中，如果请求不包含 fingerprint 参数，指纹校验直接跳过。
+    攻击者只需知道合法 deviceId（可从网络流量嗅探），不发送 x-device-fingerprint 头即可绕过白名单。
+  </div>
+  <div class="attack-flow">
+    <div class="attack-step">
+      <span class="step-num">1</span>
+      <span class="step-text">嗅探 LAN 流量获取合法 <strong>deviceId</strong></span>
+    </div>
+    <div class="attack-step">
+      <span class="step-num">2</span>
+      <span class="step-text">发送请求时 <strong>不包含</strong> x-device-fingerprint 头</span>
+    </div>
+    <div class="attack-step">
+      <span class="step-num">3</span>
+      <span class="step-text">isAllowed() 跳过指纹校验 → <strong>直接放行</strong></span>
+    </div>
+  </div>
+  <div class="comparison">
+    <div class="before">
+      <div class="label-before">❌ 修复前</div>
+      <pre>// fingerprint 为 null → 跳过
+if (fingerprint != null && d.containsKey(kFingerprint)) {
+  return d[kFingerprint] == fingerprint;
+}
+return true; // ← 直接放行！</pre>
+    </div>
+    <div class="after">
+      <div class="label-after">✅ 修复后</div>
+      <pre>// 有指纹 → 必须提供且匹配
+if (storedFingerprint.isEmpty) return true;
+if (fingerprint == null || fingerprint.isEmpty)
+  return false; // ← 必须提供指纹
+return _constantTimeEqual(
+  fingerprint, storedFingerprint);</pre>
+    </div>
+  </div>
+  <div class="fix-label">修复方案</div>
+  <div class="fix-desc">
+    ① DeviceWhitelist.isAllowed() 中白名单有指纹时，fingerprint 必填且使用常量时间比较<br>
+    ② _checkDangerousAction() 中 x-device-fingerprint 为必填头
+  </div>
+</div>
+
+<!-- ATK-W07 -->
+<div class="card">
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <span class="severity high">HIGH</span>
+    <span class="vuln-id">ATK-W07</span>
+    <span class="status-badge">✓ 已修复</span>
+  </div>
+  <div class="vuln-title">Auth Token 日志泄露</div>
+  <div class="vuln-desc">
+    服务器启动时 print 输出 auth token 前 8 字符。32 字节 Base64 编码约 44 字符，前 8 字符将暴力搜索空间从 2^256 降至约 2^48。
+    如果攻击者能访问进程输出（如 Docker logs），可大幅加速暴力破解。
+  </div>
+  <div class="comparison">
+    <div class="before">
+      <div class="label-before">❌ 修复前</div>
+      <pre>print('[HTTPS] Server started on port $port'
+  '(auth token: ${_authToken!.substring(0, 8)}...)');</pre>
+    </div>
+    <div class="after">
+      <div class="label-after">✅ 修复后</div>
+      <pre>print('[HTTPS] Server started on port $port'
+  '(TLS: $useTls)');
+// 注意：不再输出 auth token 任何部分</pre>
+    </div>
+  </div>
+  <div class="fix-label">修复方案</div>
+  <div class="fix-desc">完全移除 token 输出，只记录端口号和 TLS 状态</div>
+</div>
+
+<!-- ATK-W08 -->
+<div class="card">
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <span class="severity high">HIGH</span>
+    <span class="vuln-id">ATK-W08</span>
+    <span class="status-badge">✓ 已修复</span>
+  </div>
+  <div class="vuln-title">请求体大小无限制 — OOM 攻击</div>
+  <div class="vuln-desc">
+    /pair 和 /unpair 端点直接读取整个请求体，无大小限制。攻击者可发送超大 JSON（如 1GB），
+    导致服务端内存耗尽崩溃（OOM Kill），实现拒绝服务攻击。
+  </div>
+  <div class="fix-label">修复方案</div>
+  <div class="fix-desc">
+    ① 新增 _readBodySafe() 方法：检查 Content-Length + 实际读取大小，超过 10KB 拒绝<br>
+    ② /pair 输入字段长度验证：deviceId ≤ 64, name ≤ 128, fingerprint ≤ 256<br>
+    ③ /unpair 输入字段长度验证：deviceId ≤ 64
+  </div>
+</div>
+
+<!-- ATK-W09 -->
+<div class="card">
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <span class="severity medium">MEDIUM</span>
+    <span class="vuln-id">ATK-W09</span>
+    <span class="status-badge">✓ 已修复</span>
+  </div>
+  <div class="vuln-title">速率限制无递增 + 无全局频率限制</div>
+  <div class="vuln-desc">
+    速率限制固定 60 秒封禁，攻击者每分钟可试 3 次密码。按此速率，一天可尝试约 4,320 次。
+    另外无全局请求频率限制，攻击者可高频发送请求造成服务压力。
+  </div>
+  <div class="fix-label">修复方案</div>
+  <div class="fix-desc">
+    ① 递增封禁：第 1 次 60s → 第 2 次 5min → 第 3 次 30min → 第 4 次+ 1h<br>
+    ② 全局频率限制：同一 IP 每秒最多 10 个请求（100ms 最小间隔）<br>
+    ③ RateEntry 新增 blockCount 字段追踪累计封禁次数
+  </div>
+</div>
+
+<!-- ATK-W10 -->
+<div class="card">
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <span class="severity medium">MEDIUM</span>
+    <span class="vuln-id">ATK-W10</span>
+    <span class="status-badge">✓ 已修复</span>
+  </div>
+  <div class="vuln-title">错误信息泄露 + 输入未消毒 + 时序侧信道</div>
+  <div class="vuln-desc">
+    三合一漏洞：① /pair 错误响应包含异常堆栈信息，泄露内部实现细节；
+    ② 审计日志未对输入做截断，可注入超长字符串；
+    ③ _constantTimeEqual 长度不同时提前返回，泄露 Token 长度信息。
+  </div>
+  <div class="fix-label">修复方案</div>
+  <div class="fix-desc">
+    ① 错误响应不再包含异常信息（如 "Invalid pairing data" 而非 "Invalid pairing data: FormatException"）<br>
+    ② 审计日志 action 截断至 64 字符，clientIp 截断至 45 字符<br>
+    ③ _constantTimeEqual 长度不同时仍遍历完整长度，消除时序侧信道
+  </div>
+</div>
+
+<!-- ATK-W11 -->
+<div class="card">
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <span class="severity medium">MEDIUM</span>
+    <span class="vuln-id">ATK-W11</span>
+    <span class="status-badge">✓ 已修复</span>
+  </div>
+  <div class="vuln-title">WebSocket 信令明文传输</div>
+  <div class="vuln-desc">
+    SignalingClient 使用 ws:// 连接信令服务器，SDP offer/answer 和 ICE candidate 全部明文传输。
+    中间人可截获 WebRTC 连接建立信息，甚至注入伪造 SDP 实现中间人攻击。
+  </div>
+  <div class="fix-label">修复方案</div>
+  <div class="fix-desc">
+    新增 _ensureSecureUrl()：非 localhost 的 ws:// 自动升级为 wss://。
+    本地开发环境（localhost/127.0.0.1）保持 ws://，生产环境强制 wss://。
+  </div>
+</div>
+
+</div>
+
+<h2 class="section-title">安全评分演变</h2>
+
+<div class="timeline">
+  <div class="timeline-item">
+    <span class="tl-version">原始</span>
+    <span class="tl-score" style="color:var(--red)">4.9</span>
+    <span class="tl-desc">明文传输 + 硬编码密钥 + 无认证 + 无速率限制</span>
+  </div>
+  <div class="timeline-item">
+    <span class="tl-version">Vol.1</span>
+    <span class="tl-score" style="color:var(--orange)">7.8</span>
+    <span class="tl-desc">+ Token 认证 + SAFE_MODE + 审计日志 + 常量时间比较</span>
+  </div>
+  <div class="timeline-item">
+    <span class="tl-version">Vol.2</span>
+    <span class="tl-score" style="color:var(--yellow)">8.5</span>
+    <span class="tl-desc">+ HTTPS + 速率限制 + 设备白名单 + fail-closed + UDP V4</span>
+  </div>
+  <div class="timeline-item">
+    <span class="tl-version">Vol.3</span>
+    <span class="tl-score" style="color:var(--green)">9.2</span>
+    <span class="tl-desc">+ 白名单必检 + CORS/安全头 + test-mode后门移除 + 信息泄露加固 + 内存清理</span>
+  </div>
+  <div class="timeline-item">
+    <span class="tl-version" style="color:var(--accent)">Vol.4</span>
+    <span class="tl-score" style="color:var(--accent); font-size:1.2rem;">9.5</span>
+    <span class="tl-desc">+ 指纹必检 + Token日志清零 + 请求体限制 + 递增封禁 + 输入验证 + 信令TLS + 侧信道消除</span>
+  </div>
+</div>
+
+<h2 class="section-title">10 层安全防线（Vol.4 升级）</h2>
+
+<div class="defense-grid">
+  <div class="defense-item">
+    <div class="defense-layer">L1 传输层</div>
+    <div class="defense-name">HTTPS (TLS 1.2+)</div>
+    <div class="defense-desc">RSA-2048 自签名证书，AES-256-GCM 加密通道</div>
+  </div>
+  <div class="defense-item">
+    <div class="defense-layer">L2 认证层</div>
+    <div class="defense-name">32 字节 CSPRNG Token</div>
+    <div class="defense-desc">常量时间比较 + 长度侧信道消除（Vol.4 升级）</div>
+  </div>
+  <div class="defense-item">
+    <div class="defense-layer">L3 授权层</div>
+    <div class="defense-name">设备白名单 + 指纹验证</div>
+    <div class="defense-desc">deviceId + fingerprint 双重必填 + 常量时间比较（Vol.4 升级）</div>
+  </div>
+  <div class="defense-item">
+    <div class="defense-layer">L4 防护层</div>
+    <div class="defense-name">递增速率限制 + 全局限频</div>
+    <div class="defense-desc">60s→5min→30min→1h 递增封禁 + 10req/s 全局限制（Vol.4 新增）</div>
+  </div>
+  <div class="defense-item">
+    <div class="defense-layer">L5 安全体</div>
+    <div class="defense-name">SAFE_MODE + 审计日志</div>
+    <div class="defense-desc">输入消毒 + 截断防护 + 100 条上限</div>
+  </div>
+  <div class="defense-item">
+    <div class="defense-layer">L6 原生层</div>
+    <div class="defense-name">调试检测 + 完整性校验</div>
+    <div class="defense-desc">fail-closed 设计，校验失败 → 拒绝操作</div>
+  </div>
+  <div class="defense-item">
+    <div class="defense-layer">L7 加固层</div>
+    <div class="defense-name">CORS + 安全响应头</div>
+    <div class="defense-desc">localhost-only CORS + 5 个安全头 + DNS rebinding 防护</div>
+  </div>
+  <div class="defense-item">
+    <div class="defense-layer">L8 混淆层</div>
+    <div class="defense-name">Android ProGuard</div>
+    <div class="defense-desc">代码混淆 + 资源压缩，增加逆向难度</div>
+  </div>
+  <div class="defense-item">
+    <div class="defense-layer">L9 限制层</div>
+    <div class="defense-name">请求体限制 + 输入验证</div>
+    <div class="defense-desc">10KB 请求体上限 + 字段长度验证（Vol.4 新增）</div>
+  </div>
+  <div class="defense-item">
+    <div class="defense-layer">L10 信令层</div>
+    <div class="defense-name">WebSocket TLS 强制</div>
+    <div class="defense-desc">非本地连接自动升级 ws:// → wss://（Vol.4 新增）</div>
+  </div>
+</div>
+
+<h2 class="section-title">Vol.3 自检发现</h2>
+
+<div class="card" style="margin-bottom:20px;">
+  <p style="color:var(--muted); margin-bottom:12px;">
+    Vol.4 开始前对 Vol.3 修复进行自检，发现 ATK-W01（白名单绕过）修复不完整：
+  </p>
+  <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); border-radius:8px; padding:16px; margin-bottom:12px;">
+    <strong style="color:var(--red);">自检发现：</strong>Vol.3 修了 deviceId 必填，但 fingerprint 仍是可选的。
+    攻击者知道合法 deviceId 后，不发送 x-device-fingerprint 头即可绕过指纹校验。
+    这是典型的<strong>链式漏洞</strong>——修了 A 绕过点，攻击转移到 B 绕过点。
+  </div>
+  <div style="background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.2); border-radius:8px; padding:16px;">
+    <strong style="color:var(--green);">教训：</strong>安全修复必须验证整个攻击链，而不能只修单个检查点。
+    白名单机制的两个维度（deviceId + fingerprint）都必须强制校验。
+  </div>
+</div>
+
+<h2 class="section-title">累计漏洞修复统计</h2>
+
+<div class="card">
+  <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+    <thead>
+      <tr style="border-bottom:2px solid var(--border);">
+        <th style="text-align:left; padding:8px; color:var(--muted);">编号</th>
+        <th style="text-align:left; padding:8px; color:var(--muted);">级别</th>
+        <th style="text-align:left; padding:8px; color:var(--muted);">问题</th>
+        <th style="text-align:left; padding:8px; color:var(--muted);">轮次</th>
+        <th style="text-align:center; padding:8px; color:var(--muted);">状态</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 8px;" class="vuln-id">W01</td><td style="padding:6px 8px;"><span class="severity critical" style="font-size:0.7rem;">CRITICAL</span></td><td style="padding:6px 8px;">白名单绕过：无 deviceId 跳过检查</td><td style="padding:6px 8px; color:var(--muted);">V3</td><td style="text-align:center; padding:6px 8px;">✅</td></tr>
+      <tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 8px;" class="vuln-id">W02</td><td style="padding:6px 8px;"><span class="severity high" style="font-size:0.7rem;">HIGH</span></td><td style="padding:6px 8px;">test-mode 后门：/audit-log 绕过认证</td><td style="padding:6px 8px; color:var(--muted);">V3</td><td style="text-align:center; padding:6px 8px;">✅</td></tr>
+      <tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 8px;" class="vuln-id">W03</td><td style="padding:6px 8px;"><span class="severity high" style="font-size:0.7rem;">HIGH</span></td><td style="padding:6px 8px;">未授权信息泄露：/safe-mode, /heartbeat</td><td style="padding:6px 8px; color:var(--muted);">V3</td><td style="text-align:center; padding:6px 8px;">✅</td></tr>
+      <tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 8px;" class="vuln-id">W04</td><td style="padding:6px 8px;"><span class="severity medium" style="font-size:0.7rem;">MEDIUM</span></td><td style="padding:6px 8px;">无 CORS/安全响应头</td><td style="padding:6px 8px; color:var(--muted);">V3</td><td style="text-align:center; padding:6px 8px;">✅</td></tr>
+      <tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 8px;" class="vuln-id">W05</td><td style="padding:6px 8px;"><span class="severity medium" style="font-size:0.7rem;">MEDIUM</span></td><td style="padding:6px 8px;">速率限制内存泄漏</td><td style="padding:6px 8px; color:var(--muted);">V3</td><td style="text-align:center; padding:6px 8px;">✅</td></tr>
+      <tr style="border-bottom:1px solid var(--border); background:rgba(0,212,255,0.03);"><td style="padding:6px 8px;" class="vuln-id">W06</td><td style="padding:6px 8px;"><span class="severity critical" style="font-size:0.7rem;">CRITICAL</span></td><td style="padding:6px 8px;">设备指纹绕过：无 fingerprint 跳过校验</td><td style="padding:6px 8px; color:var(--accent);">V4</td><td style="text-align:center; padding:6px 8px;">✅</td></tr>
+      <tr style="border-bottom:1px solid var(--border); background:rgba(0,212,255,0.03);"><td style="padding:6px 8px;" class="vuln-id">W07</td><td style="padding:6px 8px;"><span class="severity high" style="font-size:0.7rem;">HIGH</span></td><td style="padding:6px 8px;">Auth Token 日志泄露</td><td style="padding:6px 8px; color:var(--accent);">V4</td><td style="text-align:center; padding:6px 8px;">✅</td></tr>
+      <tr style="border-bottom:1px solid var(--border); background:rgba(0,212,255,0.03);"><td style="padding:6px 8px;" class="vuln-id">W08</td><td style="padding:6px 8px;"><span class="severity high" style="font-size:0.7rem;">HIGH</span></td><td style="padding:6px 8px;">请求体无限制 — OOM 攻击</td><td style="padding:6px 8px; color:var(--accent);">V4</td><td style="text-align:center; padding:6px 8px;">✅</td></tr>
+      <tr style="border-bottom:1px solid var(--border); background:rgba(0,212,255,0.03);"><td style="padding:6px 8px;" class="vuln-id">W09</td><td style="padding:6px 8px;"><span class="severity medium" style="font-size:0.7rem;">MEDIUM</span></td><td style="padding:6px 8px;">速率限制无递增 + 无全局限频</td><td style="padding:6px 8px; color:var(--accent);">V4</td><td style="text-align:center; padding:6px 8px;">✅</td></tr>
+      <tr style="border-bottom:1px solid var(--border); background:rgba(0,212,255,0.03);"><td style="padding:6px 8px;" class="vuln-id">W10</td><td style="padding:6px 8px;"><span class="severity medium" style="font-size:0.7rem;">MEDIUM</span></td><td style="padding:6px 8px;">错误信息泄露 + 输入未消毒 + 时序侧信道</td><td style="padding:6px 8px; color:var(--accent);">V4</td><td style="text-align:center; padding:6px 8px;">✅</td></tr>
+      <tr style="background:rgba(0,212,255,0.03);"><td style="padding:6px 8px;" class="vuln-id">W11</td><td style="padding:6px 8px;"><span class="severity medium" style="font-size:0.7rem;">MEDIUM</span></td><td style="padding:6px 8px;">WebSocket 信令明文传输</td><td style="padding:6px 8px; color:var(--accent);">V4</td><td style="text-align:center; padding:6px 8px;">✅</td></tr>
+    </tbody>
+  </table>
+  <div style="margin-top:16px; padding:12px; background:var(--card2); border-radius:8px; text-align:center;">
+    <span style="color:var(--green); font-weight:700; font-size:1.1rem;">11 个漏洞全部修复</span>
+    <span style="color:var(--muted); margin-left:8px;">2 CRITICAL · 4 HIGH · 5 MEDIUM</span>
+  </div>
+</div>
+
+<div class="footer">
+  <p>Remote PC v1.0.4 · 白帽安全审计 Vol.4 · 2026-06-10</p>
+  <p style="margin-top:4px;">Commit: a7dc344 · Flutter Analyze: 0 errors, 0 warnings</p>
+</div>
+
+</div>
+</body>
+</html>

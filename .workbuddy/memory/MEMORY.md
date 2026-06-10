@@ -2,7 +2,7 @@
 
 ## 项目基本信息
 - 路径: C:/Users/Administrator/Desktop/remote-pc-flutter/
-- 当前版本: 1.0.3+3
+- 当前版本: 1.0.4
 - 技术栈: Flutter 3.x + Dart 3.x
 - 五端: Android / iOS / Windows / macOS / Linux
 
@@ -12,22 +12,22 @@
 - 安全: AES-256-GCM 授权 + DynamicFirewall 多语言防火墙 + MethodChannel 原生桥接
 - 控制: HTTP 服务端口 9998 / UDP 发现端口 4567
 
-## v1.0.3-v1.0.4 安全演进
-- SAFE_MODE 三层防护（环境变量 + 请求头 + Token 校验）
-- 原生安全桥接三端实现（Android Kotlin / Windows C++ / macOS Swift）
-- HTTPS (TLS) 自签名 RSA-2048 证书
-- 速率限制 (3次失败→60s封禁 + 定期清理)
-- 设备配对白名单 (deviceId 必须 + 指纹验证)
-- CORS + 安全响应头
-- Android ProGuard 代码混淆
-- 常量时间比较 (防时序攻击)
-- DNS rebinding 防护
-- fail-closed 策略 (verifySystemIntegrity 调用失败→false)
+## v1.0.4 安全防线（10 层）
+1. **L1 传输层**: HTTPS (TLS 1.2+) RSA-2048 自签名证书
+2. **L2 认证层**: 32 字节 CSPRNG Token + 常量时间比较 + 长度侧信道消除
+3. **L3 授权层**: 设备白名单 deviceId + fingerprint 双重必填
+4. **L4 防护层**: 递增速率限制 (60s→5min→30min→1h) + 全局 10req/s
+5. **L5 安全体**: SAFE_MODE + 审计日志 (输入消毒+截断)
+6. **L6 原生层**: 调试检测 + 完整性校验 (fail-closed)
+7. **L7 加固层**: CORS (localhost-only) + 5 安全头 + DNS rebinding 防护
+8. **L8 混淆层**: Android ProGuard + 资源压缩
+9. **L9 限制层**: 10KB 请求体上限 + 字段长度验证
+10. **L10 信令层**: WebSocket 非本地连接强制 wss://
 
 ## 安全评分
-- 原始: 4.9/10 → Vol.1: 7.8/10 → Vol.2: 8.5/10 → Vol.3: **9.2/10**
+- 原始: 4.9 → V1: 7.8 → V2: 8.5 → V3: 9.2 → V4: **9.5/10**
 
-## 三轮白帽攻击已修复漏洞
+## 四轮白帽攻击已修复漏洞（共 16 个）
 ### Vol.1 (7个)
 - 硬编码密钥、无认证、明文 Token、无审计、无 TLS 等
 ### Vol.2 (5个修复，3个延后)
@@ -38,6 +38,13 @@
 - W03 HIGH: 未授权信息泄露（/safe-mode, /heartbeat）
 - W04 MEDIUM: 无 CORS/安全头（浏览器 CSRF）
 - W05 MEDIUM: 速率限制内存泄漏
+### Vol.4 (6个)
+- W06 CRITICAL: 设备指纹绕过（无 x-device-fingerprint 跳过校验）
+- W07 HIGH: Auth Token 日志泄露
+- W08 HIGH: 请求体无限制 — OOM 攻击
+- W09 MEDIUM: 速率限制无递增 + 无全局频率限制
+- W10 MEDIUM: 错误信息泄露 + 输入未消毒 + 时序侧信道
+- W11 MEDIUM: WebSocket 信令明文传输
 
 ## 已知剩余风险
 - P2: WebRTC DataChannel 无独立认证

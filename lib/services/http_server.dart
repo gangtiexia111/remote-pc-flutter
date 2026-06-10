@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import '../models/device.dart';
 import '../security/license_manager.dart';
 import '../security/device_whitelist.dart';
+import '../security/certificate_manager.dart';
 
 /// HTTP 控制服务 — 对应原 Java 版 DesktopHttpServer.java
 ///
@@ -18,6 +19,12 @@ class HttpServerService {
 
   /// 授权 Token（启动时生成，主端需通过安全通道获取）
   String? _authToken;
+
+  /// Token 生成时间（V5-04 修复：Token 过期机制）
+  int? _tokenGeneratedAt;
+
+  /// Token 有效期（24 小时）
+  static const int _tokenValidityMs = 24 * 60 * 60 * 1000;
 
   /// SAFE_MODE 状态
   bool _safeMode = false;
@@ -68,6 +75,9 @@ class HttpServerService {
   /// 设备配对白名单
   final DeviceWhitelist _whitelist = DeviceWhitelist();
 
+  /// TLS 证书管理器（V5-02 修复：私钥不再打包进 assets）
+  final CertificateManager _certManager = CertificateManager();
+
   /// TLS 开关（设为 true 启用 HTTPS）
   bool enableTls = true;
 
@@ -88,8 +98,8 @@ class HttpServerService {
   /// 启动 HTTP/HTTPS 服务
   ///
   /// [useTls] 是否启用 HTTPS（默认 true）
-  /// [certBytes] PEM 证书字节（null 时从 assets 加载）
-  /// [keyBytes] PEM 私钥字节（null 时从 assets 加载）
+  /// V5-02 修复：优先从 CertificateManager 加载证书（私钥在安全存储），
+  /// 如果不可用则降级到 assets（兼容旧版本），最终降级到 HTTP
   Future<void> start({
     int port = _defaultPort,
     bool useTls = true,
@@ -107,20 +117,48 @@ class HttpServerService {
 
     _authToken = _generateToken();
 
-    // 加载 TLS 证书
+    // ── 加载 TLS 证书（V5-02 修复：优先使用运行时生成的证书）────
     List<int>? finalCert;
     List<int>? finalKey;
+    bool actuallyUseTls = useTls;
+
     if (useTls) {
-      finalCert = certBytes ??
-          (await rootBundle.load('assets/certs/cert.pem')).buffer.asUint8List();
-      finalKey = keyBytes ??
-          (await rootBundle.load('assets/certs/key.pem')).buffer.asUint8List();
+      // 1. 优先使用调用方提供的证书
+      if (certBytes != null && keyBytes != null) {
+        finalCert = certBytes;
+        finalKey = keyBytes;
+      }
+      // 2. 尝试从 CertificateManager 加载（安全存储中的运行时证书）
+      else if (await _certManager.loadOrGenerate()) {
+        finalCert = utf8.encode(_certManager.certPem!);
+        finalKey = utf8.encode(_certManager.keyPem!);
+        print('[HTTP] 🔒 Using runtime-generated TLS certificate (fingerprint: '
+            '${_certManager.fingerprint?.substring(0, 23)}...)');
+      }
+      // 3. 降级：从 assets 加载（兼容旧版本，私钥可能被打包进应用）
+      else {
+        try {
+          finalCert = (await rootBundle.load('assets/certs/cert.pem'))
+              .buffer
+              .asUint8List();
+          finalKey = (await rootBundle.load('assets/certs/key.pem'))
+              .buffer
+              .asUint8List();
+          print('[HTTP] ⚠️ Using bundled TLS certificate (INSECURE — private key in app bundle)');
+          print('[HTTP] ⚠️ Install OpenSSL for runtime certificate generation');
+        } catch (e) {
+          // 4. 最终降级：HTTP 明文
+          actuallyUseTls = false;
+          print('[HTTP] ⚠️ No TLS certificate available — falling back to HTTP');
+          print('[HTTP] ⚠️ All data will be transmitted in plaintext!');
+        }
+      }
     }
 
-    _server = await _bindServer(port, useTls, finalCert, finalKey);
+    _server = await _bindServer(port, actuallyUseTls, finalCert, finalKey);
 
-    final scheme = useTls ? 'HTTPS' : 'HTTP';
-    print('[$scheme] Server started on port $port (TLS: $useTls)');
+    final scheme = actuallyUseTls ? 'HTTPS' : 'HTTP';
+    print('[$scheme] Server started on port $port (TLS: $actuallyUseTls)');
     // 注意：不再输出 auth token 任何部分（ATK-W07 修复）
 
     await for (final req in _server!) {
@@ -147,10 +185,11 @@ class HttpServerService {
     return HttpServer.bind(InternetAddress.loopbackIPv4, port);
   }
 
-  /// 生成 32 字节密码学安全随机 Token
+  /// 生成 32 字节密码学安全随机 Token（含过期时间 V5-04）
   String _generateToken() {
     final r = Random.secure();
     final rand = List<int>.generate(32, (_) => r.nextInt(256));
+    _tokenGeneratedAt = DateTime.now().millisecondsSinceEpoch;
     return base64Encode(rand);
   }
 
@@ -218,6 +257,31 @@ class HttpServerService {
     }
   }
 
+  /// 严格检查 Host 头是否为本地地址（V5-06 修复：防 DNS rebinding 绕过）
+  /// 正确解析 host:port 格式，防止 127.0.0.1.evil.com 类绕过
+  bool _isLocalHostHeader(String hostHeader) {
+    if (hostHeader.isEmpty) return true;
+
+    // 解析 host:port — Host 头格式为 "hostname:port" 或 "hostname"
+    String hostname;
+    // IPv6 地址: [::1]:port
+    if (hostHeader.startsWith('[')) {
+      final bracketEnd = hostHeader.indexOf(']');
+      if (bracketEnd == -1) return false;
+      hostname = hostHeader.substring(1, bracketEnd);
+    } else {
+      // IPv4 或域名: hostname:port
+      final colonIndex = hostHeader.lastIndexOf(':');
+      hostname = colonIndex > 0
+          ? hostHeader.substring(0, colonIndex)
+          : hostHeader;
+    }
+
+    // 严格匹配：必须是精确的本地主机名
+    const localHostnames = {'127.0.0.1', 'localhost', '::1', '0:0:0:0:0:0:0:1'};
+    return localHostnames.contains(hostname.toLowerCase());
+  }
+
   // ── CORS + 安全响应头 ──────────────────────────────
 
   /// 允许的来源（仅 localhost，防止浏览器 CSRF）
@@ -260,6 +324,20 @@ class HttpServerService {
     // 禁止浏览器缓存敏感响应
     res.headers.add('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.headers.add('Pragma', 'no-cache');
+    // V5-10：添加 Content-Security-Policy（防止注入脚本执行）
+    res.headers.add('Content-Security-Policy',
+        "default-src 'none'; frame-ancestors 'none'");
+    // V5-10：添加 Strict-Transport-Security（HTTPS 时）
+    // 告诉浏览器只用 HTTPS 连接此服务（1 年有效期）
+    if (req.uri.scheme == 'https') {
+      res.headers.add('Strict-Transport-Security',
+          'max-age=31536000; includeSubDomains');
+    }
+    // V5-10：添加 Referrer-Policy（防止 URL 泄露 Token）
+    res.headers.add('Referrer-Policy', 'no-referrer');
+    // V5-10：权限策略（限制浏览器 API 使用）
+    res.headers.add('Permissions-Policy',
+        'camera=(), microphone=(), geolocation=()');
   }
 
   // ── 速率限制 ──────────────────────────────────────
@@ -359,6 +437,21 @@ class HttpServerService {
 
   bool _isAuthorized(HttpRequest req) {
     final clientIp = _clientIp(req);
+
+    // V5-04 修复：检查 Token 是否过期
+    if (_tokenGeneratedAt != null) {
+      final age = DateTime.now().millisecondsSinceEpoch - _tokenGeneratedAt!;
+      if (age > _tokenValidityMs) {
+        // Token 过期 → 自动刷新
+        _authToken = _generateToken();
+        print('[HTTP] 🔄 Auth token refreshed (previous token expired after '
+            '${age ~/ 3600000}h)');
+        // 过期的 Token 不能通过验证
+        _recordFailure(clientIp);
+        return false;
+      }
+    }
+
     final token = req.headers.value('x-auth-token');
     if (token != null && _constantTimeEqual(token, _authToken ?? '')) {
       _recordSuccess(clientIp);
@@ -518,12 +611,9 @@ class HttpServerService {
       return;
     }
 
+    // V5-06 修复：严格解析 Host 头，防止 DNS rebinding 绕过
     final host = req.headers.value('host') ?? '';
-    final isLocalHost = host.startsWith('127.0.0.1') ||
-        host.startsWith('localhost') ||
-        host.startsWith('::1') ||
-        host.isEmpty;
-    if (!isLocalHost) {
+    if (!_isLocalHostHeader(host)) {
       _addAuditLog('AUTH_TOKEN', 'DNS_REBINDING_SUSPECT', clientIp);
       _respondForbidden(req, 'Suspicious Host header — possible DNS rebinding');
       return;
@@ -620,9 +710,11 @@ class HttpServerService {
   }
 
   void _respondNotFound(HttpRequest req) {
+    // V5-10：统一 JSON 错误格式，不泄露服务细节
     req.response
       ..statusCode = 404
-      ..write('Not Found')
+      ..headers.contentType = ContentType.json
+      ..write(jsonEncode({'error': 'not_found'}))
       ..close();
   }
 
@@ -652,6 +744,13 @@ class HttpServerService {
     if (!isLocal) {
       _addAuditLog('PAIR', 'REJECTED_REMOTE', clientIp);
       _respondForbidden(req, 'Pairing only allowed from localhost');
+      return;
+    }
+
+    // 第二层：需要认证 Token（V5-EXTRA 修复：本地恶意进程也需 Token）
+    if (!_isAuthorized(req)) {
+      _addAuditLog('PAIR', 'UNAUTHORIZED', clientIp);
+      _respondForbidden(req, 'Unauthorized. Provide x-auth-token header.');
       return;
     }
 
