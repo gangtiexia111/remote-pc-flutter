@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:cryptography/cryptography.dart' as crypto;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../services/native_security_bridge.dart';
 
 /// 动态多语言防火墙 — 桌面端防破解核心
 ///
@@ -153,18 +154,28 @@ class DynamicFirewall {
   Map<String, dynamic> getDynamicState() => Map.from(_dynamicState);
 
   /// 检测是否正在被调试（桌面端）
-  bool isBeingDebugged() {
-    // Windows: 检测 IsDebuggerPresent
-    // macOS:  检测 sysctl kinfo_proc P_TRACED
-    // 实际通过 MethodChannel 调用原生 API
-    // 此处为 Dart 侧模拟
-    return false; // 应由原生层实现
+  /// 通过 NativeSecurityBridge 调用各平台原生 API
+  /// Windows: IsDebuggerPresent()
+  /// macOS: sysctl kinfo_proc -> P_TRACED flag
+  /// Android: Debug.isDebuggerConnected()
+  Future<bool> isBeingDebugged() async {
+    try {
+      return await NativeSecurityBridge.isBeingDebugged();
+    } catch (_) {
+      return false; // 检测失败 → 不阻塞（调试检测不适用 fail-closed）
+    }
   }
 
-  /// 完整性校验：检查关键 Dart 文件是否被篡改
-  /// 实际应通过原生层计算 APK/IPA/EXE 的哈希
+  /// 完整性校验：检查应用是否被篡改
+  /// 通过 NativeSecurityBridge 调用各平台原生 API
+  /// Windows: PE 校验和 + 关键 DLL 验证
+  /// macOS: codesign 校验
+  /// Android: 签名校验
   Future<bool> verifyIntegrity() async {
-    // 模拟：实际应调用 MethodChannel -> 计算应用包哈希
-    return true;
+    try {
+      return await NativeSecurityBridge.verifySystemIntegrity();
+    } catch (_) {
+      return false; // 校验失败 → 认为被篡改（fail-closed）
+    }
   }
 }

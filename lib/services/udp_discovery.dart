@@ -5,10 +5,15 @@ import '../models/device.dart';
 
 /// UDP 设备发现服务 — 对应原 Java 版 UdpDiscovery.java
 /// 支持跨平台（Android/iOS/Windows/macOS/Linux）
+///
+/// v1.0.4 安全加固：
+///   - 时间戳 + nonce 防重放攻击
+///   - Magic header 防误识别
+///   - 身份鉴权在 HTTP 层（DeviceWhitelist），UDP 只做发现
 class UdpDiscoveryService {
   static const int _discoveryPort = 4567;
   static const String _broadcastAddress = '255.255.255.255';
-  static const String _magicHeader = 'REMOTE_PC_V3';
+  static const String _magicHeader = 'REMOTE_PC_V4';
 
   RawDatagramSocket? _socket;
   final _devices = <String, Device>{};
@@ -81,6 +86,7 @@ class UdpDiscoveryService {
       if (_seenNonces.length > 1000) _seenNonces.clear();
 
       final id = msg['id'] as String;
+
       if (_devices.containsKey(id)) {
         _devices[id]!.markAlive();
       } else {

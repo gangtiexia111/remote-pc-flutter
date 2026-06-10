@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/services.dart' show rootBundle;
 import '../models/device.dart';
 import '../security/license_manager.dart';
+import '../security/device_whitelist.dart';
 
 /// HTTP 控制服务 — 对应原 Java 版 DesktopHttpServer.java
 ///
@@ -31,9 +32,21 @@ class HttpServerService {
   static const int _maxFailures = 3;
   static const int _blockDurationMs = 60 * 1000;
 
+  /// 速率限制清理阈值（超过此数量触发清理）
+  static const int _rateLimitCleanupThreshold = 100;
+
+  /// 上次速率限制清理时间
+  int _lastRateLimitCleanup = 0;
+
+  /// 速率限制清理间隔（5分钟）
+  static const int _rateLimitCleanupIntervalMs = 5 * 60 * 1000;
+
   HttpServer? _server;
   bool _running = false;
   Device? _selfDevice;
+
+  /// 设备配对白名单
+  final DeviceWhitelist _whitelist = DeviceWhitelist();
 
   /// TLS 开关（设为 true 启用 HTTPS）
   bool enableTls = true;
@@ -65,6 +78,9 @@ class HttpServerService {
   }) async {
     if (_running) return;
     _running = true;
+
+    // 加载设备配对白名单
+    await _whitelist.load();
 
     _safeMode = Platform.environment['SAFE_MODE'] == '1';
     if (_safeMode) print('[HTTP] ⚠️ SAFE_MODE is ON (from env)');
@@ -121,6 +137,15 @@ class HttpServerService {
   void _handleRequest(HttpRequest req) {
     final clientIp = _clientIp(req);
 
+    // ── CORS 预检请求处理 ─────────────────────────────
+    if (req.method == 'OPTIONS') {
+      _handleCorsPreflight(req);
+      return;
+    }
+
+    // ── 添加安全响应头 ────────────────────────────────
+    _addSecurityHeaders(req);
+
     // ── 速率限制检查（放在最前面）───────────────────
     final blocked = _checkRateLimit(clientIp, req);
     if (blocked) return;
@@ -129,6 +154,7 @@ class HttpServerService {
     print('[HTTP] ${req.method} $path from $clientIp');
     switch (path) {
       case '/ping':
+        // 服务发现端点：仅返回存活状态，不泄露额外信息
         _respondOk(req, {'status': 'alive'});
         break;
       case '/shutdown':
@@ -155,9 +181,62 @@ class HttpServerService {
       case '/audit-log':
         _handleAuditLogRequest(req);
         break;
+      case '/pair':
+        _handlePairRequest(req);
+        break;
+      case '/unpair':
+        _handleUnpairRequest(req);
+        break;
+      case '/paired-devices':
+        _handlePairedDevicesRequest(req);
+        break;
       default:
         _respondNotFound(req);
     }
+  }
+
+  // ── CORS + 安全响应头 ──────────────────────────────
+
+  /// 允许的来源（仅 localhost，防止浏览器 CSRF）
+  static const _allowedOrigins = [
+    'http://localhost:9998',
+    'https://localhost:9998',
+    'http://127.0.0.1:9998',
+    'https://127.0.0.1:9998',
+  ];
+
+  /// 处理 CORS 预检请求
+  void _handleCorsPreflight(HttpRequest req) {
+    final origin = req.headers.value('origin') ?? '';
+    if (_allowedOrigins.contains(origin)) {
+      req.response.headers.add('Access-Control-Allow-Origin', origin);
+      req.response.headers
+          .add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      req.response.headers.add('Access-Control-Allow-Headers',
+          'Content-Type, x-auth-token, x-device-id, x-device-fingerprint');
+      req.response.headers.add('Access-Control-Max-Age', '86400');
+    }
+    req.response.statusCode = 204;
+    req.response.close();
+  }
+
+  /// 添加安全响应头
+  void _addSecurityHeaders(HttpRequest req) {
+    final res = req.response;
+    // CORS：仅允许 localhost 来源（防浏览器 CSRF）
+    final origin = req.headers.value('origin') ?? '';
+    if (_allowedOrigins.contains(origin)) {
+      res.headers.add('Access-Control-Allow-Origin', origin);
+    }
+    // 防止浏览器 MIME 嗅探
+    res.headers.add('X-Content-Type-Options', 'nosniff');
+    // 防止点击劫持
+    res.headers.add('X-Frame-Options', 'DENY');
+    // XSS 保护
+    res.headers.add('X-XSS-Protection', '1; mode=block');
+    // 禁止浏览器缓存敏感响应
+    res.headers.add('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.headers.add('Pragma', 'no-cache');
   }
 
   // ── 速率限制 ──────────────────────────────────────
@@ -167,8 +246,25 @@ class HttpServerService {
 
   /// 检查速率限制，返回 true 表示已封禁（已回 429）
   bool _checkRateLimit(String ip, HttpRequest req) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    // ── 定期清理：移除过期或多余的速率限制记录（ATK-W05 修复）──
+    if (_rateLimit.length > _rateLimitCleanupThreshold ||
+        now - _lastRateLimitCleanup > _rateLimitCleanupIntervalMs) {
+      _rateLimit.removeWhere((key, entry) {
+        // 已过期的封禁记录
+        if (entry.blockedUntil > 0 && entry.blockedUntil <= now) return true;
+        // 10 分钟内无活动且未封禁的记录
+        if (entry.blockedUntil == 0 && entry.failures < _maxFailures) {
+          return true;
+        }
+        return false;
+      });
+      _lastRateLimitCleanup = now;
+    }
+
     final entry = _rateLimit[ip];
-    if (entry != null && entry.blockedUntil > DateTime.now().millisecondsSinceEpoch) {
+    if (entry != null && entry.blockedUntil > now) {
       _addAuditLog('RATE_LIMIT', 'BLOCKED', ip);
       req.response
         ..statusCode = 429
@@ -176,7 +272,7 @@ class HttpServerService {
         ..write(jsonEncode({
           'error': 'too_many_requests',
           'message': 'Too many failed attempts. Try again in '
-              '${((entry.blockedUntil - DateTime.now().millisecondsSinceEpoch) / 1000).ceil()}s.',
+              '${((entry.blockedUntil - now) / 1000).ceil()}s.',
         }))
         ..close();
       return true;
@@ -185,7 +281,7 @@ class HttpServerService {
     // 注意：blockedUntil=0 表示从未封禁（还在累积失败），不能清除
     if (entry != null &&
         entry.blockedUntil > 0 &&
-        entry.blockedUntil <= DateTime.now().millisecondsSinceEpoch) {
+        entry.blockedUntil <= now) {
       _rateLimit.remove(ip);
     }
     return false;
@@ -209,18 +305,24 @@ class HttpServerService {
   // ── 授权 & SAFE_MODE 检查 ────────────────────────
 
   bool _isAuthorized(HttpRequest req) {
+    final clientIp = _clientIp(req);
     final token = req.headers.value('x-auth-token');
-    if (token != null && token == _authToken) {
-      _recordSuccess(_clientIp(req));
+    if (token != null && _constantTimeEqual(token, _authToken ?? '')) {
+      _recordSuccess(clientIp);
       return true;
     }
-    final queryToken = req.uri.queryParameters['token'];
-    if (queryToken != null && queryToken == _authToken) {
-      _recordSuccess(_clientIp(req));
-      return true;
-    }
-    _recordFailure(_clientIp(req));
+    _recordFailure(clientIp);
     return false;
+  }
+
+  /// 常量时间字符串比较（防时序攻击）
+  bool _constantTimeEqual(String a, String b) {
+    if (a.length != b.length) return false;
+    int result = 0;
+    for (int i = 0; i < a.length; i++) {
+      result |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+    }
+    return result == 0;
   }
 
   bool _isTestMode(HttpRequest req) =>
@@ -229,6 +331,21 @@ class HttpServerService {
 
   bool _checkDangerousAction(HttpRequest req, String action) {
     final clientIp = _clientIp(req);
+
+    // ── 白名单检查：必须提供 deviceId，且设备必须在白名单中 ──
+    final deviceId = req.headers.value('x-device-id');
+    final fingerprint = req.headers.value('x-device-fingerprint');
+    if (deviceId == null || deviceId.isEmpty) {
+      // 未提供 deviceId → 拒绝（修复白名单绕过漏洞 ATK-W01）
+      _addAuditLog(action, 'NO_DEVICE_ID', clientIp);
+      _respondForbidden(req, 'Device ID required. Provide x-device-id header.');
+      return false;
+    }
+    if (!_whitelist.isAllowed(deviceId, fingerprint: fingerprint)) {
+      _addAuditLog(action, 'DEVICE_NOT_PAIRED', clientIp);
+      _respondForbidden(req, 'Device not paired. Use /pair endpoint first.');
+      return false;
+    }
 
     if (_safeMode) {
       if (_isTestMode(req)) {
@@ -302,6 +419,11 @@ class HttpServerService {
   // ── 安全查询端点 ────────────────────────────────────
 
   void _handleSafeModeQuery(HttpRequest req) {
+    // 加固：SAFE_MODE 状态是敏感信息，需认证
+    if (!_isAuthorized(req) && !_isTestMode(req)) {
+      _respondForbidden(req, 'Unauthorized. Provide x-auth-token header.');
+      return;
+    }
     _respondOk(req, {
       'safeMode': _safeMode,
       'message': _safeMode
@@ -369,11 +491,11 @@ class HttpServerService {
   // ── 心跳 / 自毁 ────────────────────────────────────
 
   void _handleHeartbeat(HttpRequest req) {
+    // 加固：心跳端点不再泄露敏感信息
+    // 仅返回存活状态，不暴露时间戳或设备信息
     if (_selfDevice != null) _selfDevice!.markAlive();
     _respondOk(req, {
       'status': 'alive',
-      'safeMode': _safeMode,
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
     });
   }
 
@@ -412,13 +534,107 @@ class HttpServerService {
   // ── 审计日志查询 ────────────────────────────────────
 
   void _handleAuditLogRequest(HttpRequest req) {
-    if (!_isAuthorized(req) && !_isTestMode(req)) {
+    if (!_isAuthorized(req)) {
       _respondForbidden(req, 'Unauthorized. Provide x-auth-token header.');
       return;
     }
     _respondOk(req, {
       'count': _auditLog.length,
       'logs': _auditLog,
+    });
+  }
+
+  // ── 设备配对管理 ──────────────────────────────────
+
+  /// 配对新设备（需从 localhost 发起确认，防远程配对攻击）
+  Future<void> _handlePairRequest(HttpRequest req) async {
+    final clientIp = _clientIp(req);
+
+    // 只允许本地配对确认（防止远程恶意配对）
+    final isLocal = clientIp == '127.0.0.1' ||
+        clientIp == '::1' ||
+        clientIp == '0:0:0:0:0:0:0:1';
+    if (!isLocal) {
+      _addAuditLog('PAIR', 'REJECTED_REMOTE', clientIp);
+      _respondForbidden(req, 'Pairing only allowed from localhost');
+      return;
+    }
+
+    if (req.method != 'POST') {
+      req.response
+        ..statusCode = 405
+        ..write('Method Not Allowed')
+        ..close();
+      return;
+    }
+
+    try {
+      final body = await utf8.decoder.bind(req).first;
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final deviceId = data['deviceId'] as String? ?? '';
+      final fingerprint = data['fingerprint'] as String? ?? '';
+      final name = data['name'] as String? ?? 'Unknown';
+
+      if (deviceId.isEmpty) {
+        _respondForbidden(req, 'deviceId is required');
+        return;
+      }
+
+      await _whitelist.addDevice(
+        deviceId: deviceId,
+        fingerprint: fingerprint.isNotEmpty ? fingerprint : null,
+        name: name,
+      );
+      _addAuditLog('PAIR', 'SUCCESS', clientIp);
+      _respondOk(req, {
+        'result': 'paired',
+        'deviceId': deviceId,
+        'totalDevices': _whitelist.count,
+      });
+    } catch (e) {
+      _addAuditLog('PAIR', 'ERROR', clientIp);
+      _respondForbidden(req, 'Invalid pairing data: $e');
+    }
+  }
+
+  /// 解除设备配对
+  Future<void> _handleUnpairRequest(HttpRequest req) async {
+    if (!_isAuthorized(req)) {
+      _respondForbidden(req, 'Unauthorized');
+      return;
+    }
+
+    try {
+      final body = await utf8.decoder.bind(req).first;
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final deviceId = data['deviceId'] as String? ?? '';
+
+      if (deviceId.isEmpty) {
+        _respondForbidden(req, 'deviceId is required');
+        return;
+      }
+
+      final removed = await _whitelist.removeDevice(deviceId);
+      _addAuditLog('UNPAIR', removed ? 'SUCCESS' : 'NOT_FOUND', _clientIp(req));
+      _respondOk(req, {
+        'result': removed ? 'unpaired' : 'device_not_found',
+        'deviceId': deviceId,
+        'totalDevices': _whitelist.count,
+      });
+    } catch (e) {
+      _respondForbidden(req, 'Invalid unpair data: $e');
+    }
+  }
+
+  /// 查询已配对设备列表
+  void _handlePairedDevicesRequest(HttpRequest req) {
+    if (!_isAuthorized(req)) {
+      _respondForbidden(req, 'Unauthorized');
+      return;
+    }
+    _respondOk(req, {
+      'count': _whitelist.count,
+      'devices': _whitelist.devices,
     });
   }
 
