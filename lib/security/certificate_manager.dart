@@ -215,7 +215,9 @@ class CertificateManager {
   String _generateDeviceId() {
     final r = Random.secure();
     final bytes = List<int>.generate(8, (_) => r.nextInt(256));
-    return base64Encode(bytes).replaceAll(RegExp(r'[+/=]'), '').substring(0, 12);
+    final encoded = base64Encode(bytes).replaceAll(RegExp(r'[+/=]'), '');
+    // 防止 substring 越界（去除特殊字符后长度可能不足 12）
+    return encoded.length >= 12 ? encoded.substring(0, 12) : encoded;
   }
 
   /// 计算证书指纹

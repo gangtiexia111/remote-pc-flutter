@@ -2,15 +2,21 @@
 
 ## 项目基本信息
 - 路径: C:/Users/Administrator/Desktop/remote-pc-flutter/
-- 当前版本: 1.0.3
+- 当前版本: 1.0.4-dev (发版 tag: v1.0.3)
 - 技术栈: Flutter 3.x + Dart 3.x
 - 五端: Android / iOS / Windows / macOS / Linux
+- 最新 commit: 84f425a
 
 ## 核心架构
 - 入口: main.dart（支持 --headless 模式）
 - 双模式: LAN（UDP 广播 + HTTP 直连） / 跨网络（WebSocket 信令 + WebRTC Data Channel）
-- 安全: AES-256-GCM 授权 + DynamicFirewall 多语言防火墙 + MethodChannel 原生桥接
+- 安全: AES-256-GCM + HKDF-SHA256 HMAC + DynamicFirewall + MethodChannel 原生桥接
 - 控制: HTTP 服务端口 9998 / UDP 发现端口 4567
+
+## v1.0.4-dev 新增
+- 跨网络: 安全随机 roomId 生成 (generateRoomId) + 自动重连 (3次指数退避) + 30s 连接超时
+- 代码混淆: build-release.sh / build-windows.bat + --obfuscate + --split-debug-info
+- 实测: 22 项安全测试全部通过 (SAFE_MODE=1 headless 模式)
 
 ## 安全评分
 - 原始: 4.2 → V1: 7.5 → V2: 8.8 → V3: 9.3 → V4: 9.7 → V5: 9.7 → V6: 9.8 → V7: **9.9/10**

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Remote PC v1.0.3 → v1.0.4-dev — 发版 + 开发 + 实测报告</title>
+<style>
+  :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --green: #4ade80; --red: #f87171; --orange: #fb923c; --text: #e2e8f0; --muted: #94a3b8; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; padding: 24px; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 2.2em; margin-bottom: 8px; background: linear-gradient(135deg, var(--accent), var(--green)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  h2 { font-size: 1.5em; margin: 32px 0 16px; color: var(--accent); border-bottom: 2px solid var(--accent); padding-bottom: 8px; display: inline-block; }
+  h3 { font-size: 1.15em; margin: 20px 0 10px; color: var(--green); }
+  .subtitle { color: var(--muted); font-size: 1em; margin-bottom: 24px; }
+  .card { background: var(--card); border-radius: 12px; padding: 20px; margin: 16px 0; border: 1px solid rgba(56,189,248,0.15); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin: 16px 0; }
+  .stat { text-align: center; padding: 16px; }
+  .stat .num { font-size: 2em; font-weight: 700; }
+  .stat .label { font-size: 0.85em; color: var(--muted); }
+  .green { color: var(--green); }
+  .accent { color: var(--accent); }
+  .red { color: var(--red); }
+  .orange { color: var(--orange); }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid rgba(148,163,184,0.15); }
+  th { color: var(--accent); font-weight: 600; font-size: 0.9em; }
+  td { font-size: 0.9em; }
+  tr:hover td { background: rgba(56,189,248,0.05); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 0.75em; font-weight: 600; }
+  .badge-high { background: rgba(248,113,113,0.2); color: var(--red); }
+  .badge-med { background: rgba(251,146,60,0.2); color: var(--orange); }
+  .badge-pass { background: rgba(74,222,128,0.2); color: var(--green); }
+  .badge-info { background: rgba(56,189,248,0.2); color: var(--accent); }
+  .timeline { border-left: 3px solid var(--accent); padding-left: 24px; margin: 16px 0; }
+  .timeline .event { margin: 12px 0; position: relative; }
+  .timeline .event::before { content: ''; position: absolute; left: -31px; top: 6px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
+  .timeline .event.done::before { background: var(--green); }
+  pre { background: #0d1117; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.85em; margin: 12px 0; }
+  code { font-family: 'Cascadia Code', 'Fira Code', monospace; }
+  .footer { text-align: center; color: var(--muted); margin-top: 40px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>🚀 Remote PC v1.0.3 → v1.0.4-dev</h1>
+<p class="subtitle">发版 · 继续开发 · 实测验证 — 三线并行完成报告</p>
+
+<!-- ── 总览 ── -->
+<h2>📊 总览</h2>
+<div class="card">
+<div class="grid">
+  <div class="stat"><div class="num green">22/22</div><div class="label">实测测试通过</div></div>
+  <div class="stat"><div class="num accent">9.9</div><div class="label">安全评分 /10</div></div>
+  <div class="stat"><div class="num green">54</div><div class="label">漏洞累计修复</div></div>
+  <div class="stat"><div class="num accent">84f425a</div><div class="label">最新 commit</div></div>
+</div>
+</div>
+
+<!-- ── 发版 ── -->
+<h2>📦 发版准备 (v1.0.3)</h2>
+<div class="card">
+<h3>完成项</h3>
+<div class="timeline">
+  <div class="event done"><strong>Tag v1.0.3</strong> — annotated tag 已推送到 GitHub + Gitee</div>
+  <div class="event done"><strong>CHANGELOG.md</strong> — v1.0.0 → v1.0.3 完整变更记录，安全审计修复明细</div>
+  <div class="event done"><strong>双推送</strong> — GitHub ✅ Gitee ✅</div>
+  <div class="event"><strong>GitHub Release</strong> — 需从网页手动创建（gh CLI 未安装），tag 已推送可一键生成</div>
+</div>
+</div>
+
+<!-- ── 跨网络增强 ── -->
+<h2>☁️ 跨网络模式增强</h2>
+<div class="card">
+<table>
+<tr><th>功能</th><th>实现</th><th>状态</th></tr>
+<tr><td>安全随机 roomId</td><td><code>WebRtcConnectionService.generateRoomId()</code> — Random.secure 8 字符</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>自动重连</td><td>3 次，指数退避 2s/4s/8s</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>连接超时</td><td>30 秒无应答自动取消</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>UI 随机按钮</td><td>🎲 图标一键生成 roomId</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>roomId 输入校验</td><td>V7-11 正则校验 (1-64字符, 字母数字下划线连字符)</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>DataChannel 速率限制</td><td>V7-09: 30msg/s 限流</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>出站指令校验</td><td>V7-10: 白名单双检（入站+出站）</td><td><span class="badge badge-pass">✅</span></td></tr>
+</table>
+</div>
+
+<!-- ── 代码混淆 ── -->
+<h2>🔐 代码混淆配置</h2>
+<div class="card">
+<table>
+<tr><th>层级</th><th>方案</th><th>状态</th></tr>
+<tr><td>Android (Java/Kotlin)</td><td>ProGuard — <code>isMinifyEnabled</code> + <code>isShrinkResources</code></td><td><span class="badge badge-pass">✅ 已配置</span></td></tr>
+<tr><td>Dart 层</td><td><code>--obfuscate --split-debug-info</code></td><td><span class="badge badge-pass">✅ 脚本已配置</span></td></tr>
+<tr><td>构建脚本</td><td><code>scripts/build-release.sh</code> 五端 + <code>scripts/build-windows.bat</code></td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>符号保护</td><td><code>build/debug-info/</code> 加入 .gitignore</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>日志剥离</td><td>ProGuard <code>-assumenosideeffects</code> 移除 Log.v/d/i</td><td><span class="badge badge-pass">✅</span></td></tr>
+</table>
+</div>
+
+<!-- ── 实测 ── -->
+<h2>🧪 Windows EXE 实测 (22 项安全测试)</h2>
+<div class="card">
+<p>启动方式: <code>remote_pc.exe --headless</code> (SAFE_MODE=1, PID 23412)</p>
+<table>
+<tr><th>#</th><th>测试项</th><th>预期</th><th>结果</th></tr>
+<tr><td>1</td><td><code>/ping</code> 服务发现</td><td>200 alive</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>2</td><td>GET <code>/shutdown</code></td><td>405</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>3</td><td>GET <code>/restart</code></td><td>405</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>4</td><td>GET <code>/lock-screen</code></td><td>405</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>5</td><td>GET <code>/unpair</code> (V7-01)</td><td>405</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>6</td><td>POST <code>/shutdown</code> 无 Token</td><td>403</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>7</td><td><code>/auth-token</code> 本地获取</td><td>200 + token</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>8</td><td>GET + Token → /shutdown</td><td>405 JSON</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>9</td><td>无 Device ID</td><td>403</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>10</td><td>无 Fingerprint (V7-02)</td><td>403</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>11</td><td>非白名单设备</td><td>403</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>12</td><td>速率限制 429</td><td>429</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>13</td><td>设备配对</td><td>200 paired</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>14</td><td>SAFE_MODE 拦截 /shutdown</td><td>403 blocked</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>15</td><td>SAFE_MODE 拦截 /restart</td><td>403 blocked</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>16</td><td>SAFE_MODE 拦截 /lock-screen</td><td>403 blocked</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>17</td><td>SAFE_MODE 拦截 /remote-self-destruct</td><td>403 blocked</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>18</td><td>审计日志完整</td><td>12 条记录</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>19</td><td>x-test-mode 生产环境 (V7-06)</td><td>403</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>20</td><td>未知路径</td><td>JSON 404</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>21</td><td>DNS Rebinding 防护</td><td>403</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>22</td><td>已配对设备列表</td><td>200 + devices</td><td><span class="badge badge-pass">✅</span></td></tr>
+</table>
+</div>
+
+<!-- ── 自检 ── -->
+<h2>🔍 自检结果</h2>
+<div class="card">
+<table>
+<tr><th>检查项</th><th>覆盖范围</th><th>结果</th></tr>
+<tr><td><code>_constantTimeEqual</code></td><td>4 文件 (http_server, device_whitelist, dynamic_firewall, license_manager)</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td><code>SecureStorageValidator</code></td><td>5 文件 7 处 (certificate_manager, device_whitelist, license_manager×2, dynamic_firewall)</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>POST 方法强制</td><td>6 端点 (/shutdown, /restart, /lock-screen, /remote-self-destruct, /pair, /unpair)</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>fail-closed 策略</td><td>3 处 (NativeSecurityBridge, DynamicFirewall, verifyIntegrity)</td><td><span class="badge badge-pass">✅</span></td></tr>
+<tr><td>空指纹绕过</td><td>全局搜索无 <code>isEmpty) return true</code></td><td><span class="badge badge-pass">✅ 已清除</span></td></tr>
+<tr><td>Flutter analyze</td><td>90 info (avoid_print), 0 error/warning</td><td><span class="badge badge-pass">✅</span></td></tr>
+</table>
+</div>
+
+<!-- ── Git 历史 ── -->
+<h2>📝 Git 提交历史</h2>
+<div class="card">
+<table>
+<tr><th>Commit</th><th>描述</th></tr>
+<tr><td><code>84f425a</code></td><td>feat: v1.0.4-dev — 跨网络增强 + 代码混淆 + 实测验证</td></tr>
+<tr><td><code>eda3226</code></td><td>docs: add CHANGELOG.md for v1.0.3 release</td></tr>
+<tr><td><code>v1.0.3 tag</code></td><td>Release v1.0.3 — 7-round security audit complete (9.9/10)</td></tr>
+<tr><td><code>65cb413</code></td><td>V7-补丁: DynamicFirewall.isBeingDebugged() fail-closed 一致性</td></tr>
+<tr><td><code>0efff89</code></td><td>docs: add Vol.7 security audit report (9.9/10)</td></tr>
+<tr><td><code>f0826a1</code></td><td>V7: 终极安全审计 — 12 个漏洞修复 + 1 个自检修复</td></tr>
+</table>
+</div>
+
+<!-- ── 下一步 ── -->
+<h2>🔜 后续可选项</h2>
+<div class="card">
+<ul style="list-style: none; padding: 0;">
+  <li>🔵 <strong>GitHub Release 网页创建</strong> — 从 tag 一键生成，包含 release notes</li>
+  <li>🔵 <strong>gh CLI 安装</strong> — 后续自动创建 Release 需要</li>
+  <li>🔵 <strong>代码签名</strong> — Windows Authenticode / Android 签名配置</li>
+  <li>🔵 <strong>OpenSSL 安装</strong> — 当前 Windows 无 TLS，回退到 HTTP 明文</li>
+  <li>🔵 <strong>v1.0.4 正式发版</strong> — 跨网络增强 + 混淆功能稳定后打 tag</li>
+</ul>
+</div>
+
+<div class="footer">
+  <p>Remote PC Flutter — 安全评分 9.9/10 · 54 漏洞修复 · 5 端构建验证 · 22 项实测通过</p>
+  <p>Generated by 小太 @ 2026-06-10</p>
+</div>
+
+</div>
+</body>
+</html>

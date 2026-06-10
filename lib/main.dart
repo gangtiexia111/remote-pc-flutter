@@ -38,8 +38,8 @@ Future<void> _startHeadless(LicenseManager lm, DynamicFirewall fw) async {
   )..markAlive();
   final httpSvc = HttpServerService();
   httpSvc.setDevice(device);
-  await httpSvc.start(port: 9998);
-  print('[RemotePC] Headless mode ready. HTTP server on :9998');
+  await httpSvc.start(port: 9998, useTls: true);
+  print('[RemotePC] Headless mode ready. Server on :9998 (TLS: ${httpSvc.isTls})');
   // 阻塞主线程
   await Completer<void>().future;
 }

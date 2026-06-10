@@ -71,7 +71,11 @@ class HttpServerService {
 
   HttpServer? _server;
   bool _running = false;
+  bool _actuallyUsingTls = false;
   Device? _selfDevice;
+
+  /// 当前服务是否运行在 HTTPS 模式
+  bool get isTls => _actuallyUsingTls;
 
   /// 设备配对白名单
   final DeviceWhitelist _whitelist = DeviceWhitelist();
@@ -157,6 +161,7 @@ class HttpServerService {
     }
 
     _server = await _bindServer(port, actuallyUseTls, finalCert, finalKey);
+    _actuallyUsingTls = actuallyUseTls;
 
     final scheme = actuallyUseTls ? 'HTTPS' : 'HTTP';
     print('[$scheme] Server started on port $port (TLS: $actuallyUseTls)');
@@ -177,12 +182,14 @@ class HttpServerService {
       final ctx = SecurityContext()
         ..useCertificateChainBytes(certBytes)
         ..usePrivateKeyBytes(keyBytes);
+      // HTTPS 模式绑定 anyIPv4 — 局域网设备需要能连进来
       return HttpServer.bindSecure(
         InternetAddress.anyIPv4,
         port,
         ctx,
       );
     }
+    // HTTP 降级模式仅绑定 loopback（明文不应暴露到局域网）
     return HttpServer.bind(InternetAddress.loopbackIPv4, port);
   }
 
@@ -298,12 +305,12 @@ class HttpServerService {
   void _handleCorsPreflight(HttpRequest req) {
     final origin = req.headers.value('origin') ?? '';
     if (_allowedOrigins.contains(origin)) {
-      req.response.headers.add('Access-Control-Allow-Origin', origin);
+      req.response.headers.set('Access-Control-Allow-Origin', origin);
       req.response.headers
-          .add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      req.response.headers.add('Access-Control-Allow-Headers',
+          .set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      req.response.headers.set('Access-Control-Allow-Headers',
           'Content-Type, x-auth-token, x-device-id, x-device-fingerprint');
-      req.response.headers.add('Access-Control-Max-Age', '86400');
+      req.response.headers.set('Access-Control-Max-Age', '86400');
     }
     req.response.statusCode = 204;
     req.response.close();
@@ -315,30 +322,32 @@ class HttpServerService {
     // CORS：仅允许 localhost 来源（防浏览器 CSRF）
     final origin = req.headers.value('origin') ?? '';
     if (_allowedOrigins.contains(origin)) {
-      res.headers.add('Access-Control-Allow-Origin', origin);
+      res.headers.set('Access-Control-Allow-Origin', origin);
     }
     // 防止浏览器 MIME 嗅探
-    res.headers.add('X-Content-Type-Options', 'nosniff');
+    res.headers.set('X-Content-Type-Options', 'nosniff');
     // 防止点击劫持
-    res.headers.add('X-Frame-Options', 'DENY');
+    res.headers.set('X-Frame-Options', 'DENY');
     // XSS 保护
-    res.headers.add('X-XSS-Protection', '1; mode=block');
+    res.headers.set('X-XSS-Protection', '1; mode=block');
     // 禁止浏览器缓存敏感响应
-    res.headers.add('Cache-Control', 'no-store, no-cache, must-revalidate');
-    res.headers.add('Pragma', 'no-cache');
+    res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.headers.set('Pragma', 'no-cache');
     // V5-10：添加 Content-Security-Policy（防止注入脚本执行）
-    res.headers.add('Content-Security-Policy',
+    res.headers.set('Content-Security-Policy',
         "default-src 'none'; frame-ancestors 'none'");
     // V5-10：添加 Strict-Transport-Security（HTTPS 时）
     // 告诉浏览器只用 HTTPS 连接此服务（1 年有效期）
-    if (req.uri.scheme == 'https') {
-      res.headers.add('Strict-Transport-Security',
+    // 注意：Dart HttpRequest.uri.scheme 在服务端不反映实际协议，
+    // 使用 _actuallyUsingTls 判断
+    if (_actuallyUsingTls) {
+      res.headers.set('Strict-Transport-Security',
           'max-age=31536000; includeSubDomains');
     }
     // V5-10：添加 Referrer-Policy（防止 URL 泄露 Token）
-    res.headers.add('Referrer-Policy', 'no-referrer');
+    res.headers.set('Referrer-Policy', 'no-referrer');
     // V5-10：权限策略（限制浏览器 API 使用）
-    res.headers.add('Permissions-Policy',
+    res.headers.set('Permissions-Policy',
         'camera=(), microphone=(), geolocation=()');
   }
 
@@ -656,7 +665,7 @@ class HttpServerService {
     _respondOk(req, {
       'token': _authToken,
       'safeMode': _safeMode,
-      'scheme': req.uri.scheme,
+      'scheme': _actuallyUsingTls ? 'https' : 'http',
     });
   }
 
@@ -762,7 +771,7 @@ class HttpServerService {
     req.response
       ..statusCode = 405
       ..headers.contentType = ContentType.json
-      ..headers.add('Allow', 'POST')
+      ..headers.set('Allow', 'POST')
       ..write(jsonEncode({'error': 'method_not_allowed', 'message': 'Dangerous actions require POST method'}))
       ..close();
   }

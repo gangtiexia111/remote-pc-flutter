@@ -1,7 +1,7 @@
 /// home_screen.dart
 ///
 /// 主界面 — 支持双模式：
-///   🌐 LAN 模式（UDP 广播 + HTTP 直连）
+///   🌐 LAN 模式（UDP 广播 + HTTPS 直连）
 ///   ☁️ 跨网络模式（WebSocket 信令 + WebRTC Data Channel）
 ///
 /// v1.0.3: SAFE_MODE 集成 — 危险指令需通过安全校验
@@ -53,6 +53,34 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _safeMode = false;
   String? _authToken;
 
+  /// 构建 HTTP/HTTPS URL（根据服务端 TLS 状态自动切换协议）
+  String _buildUrl(String host, int port, String path) {
+    final scheme = _http.isTls ? 'https' : 'http';
+    return '$scheme://$host:$port$path';
+  }
+
+  /// 构建自签名证书安全的 HttpClient
+  /// 自签名证书需要 badCertificateCallback 接受
+  HttpClient? _insecureClient;
+
+  HttpClient _getInsecureClient() {
+    return _insecureClient ??= HttpClient()
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) {
+        // 接受自签名证书（仅限本地/局域网连接）
+        return host == '127.0.0.1' || host == 'localhost' || host.endsWith('.local');
+      };
+  }
+
+  @override
+  void dispose() {
+    _insecureClient?.close();
+    _udp.stop();
+    _http.stop();
+    _webrtc?.disconnect();
+    _roomIdController.dispose();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -101,7 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // 同步 SAFE_MODE 状态
     _http.setSafeMode(_safeMode);
 
-    await _http.start(port: 9998);
+    await _http.start(port: 9998, useTls: true);
     setState(() => _lanServerRunning = true);
     await _udp.sendDiscoveryBroadcast(_selfDevice!);
 
@@ -109,17 +137,32 @@ class _HomeScreenState extends State<HomeScreen> {
     _fetchAuthToken();
   }
 
-  /// 从本地 HTTP 服务获取授权 Token
+  /// 从本地 HTTPS 服务获取授权 Token
   Future<void> _fetchAuthToken() async {
     try {
-      final resp =
-          await http.get(Uri.parse('http://127.0.0.1:9998/auth-token'));
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        setState(() {
-          _authToken = data['token'] as String?;
-          _safeMode = data['safeMode'] as bool? ?? _safeMode;
-        });
+      final url = _buildUrl('127.0.0.1', 9998, '/auth-token');
+      if (_http.isTls) {
+        // HTTPS 自签名证书 — 使用 HttpClient + badCertificateCallback
+        final client = _getInsecureClient();
+        final req = await client.getUrl(Uri.parse(url));
+        final resp = await req.close();
+        final body = await resp.transform(utf8.decoder).join();
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(body) as Map<String, dynamic>;
+          setState(() {
+            _authToken = data['token'] as String?;
+            _safeMode = data['safeMode'] as bool? ?? _safeMode;
+          });
+        }
+      } else {
+        final resp = await http.get(Uri.parse(url));
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          setState(() {
+            _authToken = data['token'] as String?;
+            _safeMode = data['safeMode'] as bool? ?? _safeMode;
+          });
+        }
       }
     } catch (_) {
       // 非 Windows 桌面端可能无 http 包
@@ -610,30 +653,50 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // 发送到目标设备的 HTTP 服务
+    // 发送到目标设备的 HTTP/HTTPS 服务
     try {
       final headers = <String, String>{};
       if (_authToken != null) {
         headers['x-auth-token'] = _authToken!;
       }
       final path = cmd == 'lock' ? '/lock-screen' : '/$cmd';
-      final resp = await http.post(
-        Uri.parse('http://${d.ip}:${d.port}$path'),
-        headers: headers,
-      );
-      if (resp.statusCode == 200) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('✅ 已发送 $cmd 到 ${d.ip}')),
-        );
-      } else if (resp.statusCode == 403) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('⛔ 目标设备拒绝: 目标 SAFE_MODE 可能已开启'),
-            backgroundColor: Colors.red,
-          ),
-        );
+      final url = _buildUrl(d.ip, d.port, path);
+      if (url.startsWith('https://')) {
+        // HTTPS 自签名证书 — 使用 HttpClient
+        final client = _getInsecureClient();
+        final req = await client.postUrl(Uri.parse(url));
+        headers.forEach((k, v) => req.headers.set(k, v));
+        final resp = await req.close();
+        if (resp.statusCode == 200) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('✅ 已发送 $cmd 到 ${d.ip}')),
+          );
+        } else if (resp.statusCode == 403) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('⛔ 目标设备拒绝: 目标 SAFE_MODE 可能已开启'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } else {
+        final resp = await http.post(Uri.parse(url), headers: headers);
+        if (resp.statusCode == 200) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('✅ 已发送 $cmd 到 ${d.ip}')),
+          );
+        } else if (resp.statusCode == 403) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('⛔ 目标设备拒绝: 目标 SAFE_MODE 可能已开启'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -643,7 +706,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// 本地执行控制指令（通过本地 HTTP 服务）
+  /// 本地执行控制指令（通过本地 HTTPS 服务）
   Future<void> _sendLanCommand(String cmd) async {
     try {
       final headers = <String, String>{};
@@ -651,22 +714,41 @@ class _HomeScreenState extends State<HomeScreen> {
         headers['x-auth-token'] = _authToken!;
       }
       final path = cmd == 'lock' ? '/lock-screen' : '/$cmd';
-      final resp = await http.post(
-        Uri.parse('http://127.0.0.1:9998$path'),
-        headers: headers,
-      );
-      if (!mounted) return;
-      if (resp.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('✅ 指令已执行: $cmd')),
-        );
+      final url = _buildUrl('127.0.0.1', 9998, path);
+      if (url.startsWith('https://')) {
+        // HTTPS 自签名证书 — 使用 HttpClient
+        final client = _getInsecureClient();
+        final req = await client.postUrl(Uri.parse(url));
+        headers.forEach((k, v) => req.headers.set(k, v));
+        final resp = await req.close();
+        if (!mounted) return;
+        if (resp.statusCode == 200) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('✅ 指令已执行: $cmd')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⛔ 执行失败 (${resp.statusCode})'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('⛔ 执行失败 (${resp.statusCode})'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        final resp = await http.post(Uri.parse(url), headers: headers);
+        if (!mounted) return;
+        if (resp.statusCode == 200) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('✅ 指令已执行: $cmd')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⛔ 执行失败 (${resp.statusCode})'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -821,14 +903,5 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
     return null;
-  }
-
-  @override
-  void dispose() {
-    _udp.stop();
-    _http.stop();
-    _webrtc?.disconnect();
-    _roomIdController.dispose();
-    super.dispose();
   }
 }
