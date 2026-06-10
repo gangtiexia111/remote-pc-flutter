@@ -2,74 +2,113 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'package:flutter/services.dart' show rootBundle;
 import '../models/device.dart';
 import '../security/license_manager.dart';
-// v1.0.3: SAFE_MODE 防护 + 跨平台命令支持 (macOS/Linux)
 
 /// HTTP 控制服务 — 对应原 Java 版 DesktopHttpServer.java
-/// 子端运行，接收主端控制指令
 ///
-/// v1.0.3 新增 SAFE_MODE 防护：
-///   - 环境变量 SAFE_MODE=1 时，拒绝执行关机/重启/锁屏指令
-///   - 请求头 x-test-mode 或 x-safe-mode 时，仅记录日志不执行
-///   - 所有危险指令执行前写入审计日志
-///   - 未授权访问返回 403
+/// v1.0.4 新增：
+///   - 速率限制（同 IP 失败 3 次锁 60 秒）
+///   - HTTPS 支持（自签名证书，assets/certs/）
+///   - 所有危险指令需授权 Token
 class HttpServerService {
   static const int _defaultPort = 9998;
 
   /// 授权 Token（启动时生成，主端需通过安全通道获取）
   String? _authToken;
 
-  /// SAFE_MODE 状态：由环境变量或运行时设置控制
+  /// SAFE_MODE 状态
   bool _safeMode = false;
 
   /// 审计日志（最近 100 条）
   final List<Map<String, dynamic>> _auditLog = [];
 
+  /// 速率限制：IP → (失败次数, 封禁截至时间戳 ms)
+  final Map<String, RateEntry> _rateLimit = {};
+
+  /// 速率限制阈值
+  static const int _maxFailures = 3;
+  static const int _blockDurationMs = 60 * 1000;
+
   HttpServer? _server;
   bool _running = false;
   Device? _selfDevice;
 
+  /// TLS 开关（设为 true 启用 HTTPS）
+  bool enableTls = true;
+
   bool get isRunning => _running;
   bool get safeMode => _safeMode;
 
-  /// 获取审计日志（只读）
   List<Map<String, dynamic>> get auditLog => List.unmodifiable(_auditLog);
 
   void setDevice(Device d) => _selfDevice = d;
-
-  /// 设置授权 Token
   void setAuthToken(String token) => _authToken = token;
 
-  /// 设置 SAFE_MODE（运行时切换）
   void setSafeMode(bool enabled) {
     _safeMode = enabled;
     _addAuditLog('SAFE_MODE', enabled ? 'ENABLED' : 'DISABLED', 'system');
     print('[HTTP] SAFE_MODE ${enabled ? "ON" : "OFF"}');
   }
 
-  /// 启动 HTTP 服务
-  Future<void> start({int port = _defaultPort}) async {
+  /// 启动 HTTP/HTTPS 服务
+  ///
+  /// [useTls] 是否启用 HTTPS（默认 true）
+  /// [certBytes] PEM 证书字节（null 时从 assets 加载）
+  /// [keyBytes] PEM 私钥字节（null 时从 assets 加载）
+  Future<void> start({
+    int port = _defaultPort,
+    bool useTls = true,
+    List<int>? certBytes,
+    List<int>? keyBytes,
+  }) async {
     if (_running) return;
     _running = true;
 
-    // 从环境变量读取 SAFE_MODE 初始状态
     _safeMode = Platform.environment['SAFE_MODE'] == '1';
-    if (_safeMode) {
-      print('[HTTP] ⚠️ SAFE_MODE is ON (from env)');
-    }
+    if (_safeMode) print('[HTTP] ⚠️ SAFE_MODE is ON (from env)');
 
-    // 生成随机授权 Token
     _authToken = _generateToken();
 
-    // 绑定 localhost，避免对外暴露（原 0.0.0.0 有安全风险）
-    // 如需局域网访问，启动时传入 bindAddress: InternetAddress.anyIPv4
-    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-    print(
-        '[HTTP] Server started on port $port (auth token: ${_authToken!.substring(0, 8)}...)');
+    // 加载 TLS 证书
+    List<int>? finalCert;
+    List<int>? finalKey;
+    if (useTls) {
+      finalCert = certBytes ??
+          (await rootBundle.load('assets/certs/cert.pem')).buffer.asUint8List();
+      finalKey = keyBytes ??
+          (await rootBundle.load('assets/certs/key.pem')).buffer.asUint8List();
+    }
+
+    _server = await _bindServer(port, useTls, finalCert, finalKey);
+
+    final scheme = useTls ? 'HTTPS' : 'HTTP';
+    print('[$scheme] Server started on port $port '
+        '(auth token: ${_authToken!.substring(0, 8)}..., TLS: $useTls)');
+
     await for (final req in _server!) {
       _handleRequest(req);
     }
+  }
+
+  Future<HttpServer> _bindServer(
+    int port,
+    bool useTls,
+    List<int>? certBytes,
+    List<int>? keyBytes,
+  ) async {
+    if (useTls && certBytes != null && keyBytes != null) {
+      final ctx = SecurityContext()
+        ..useCertificateChainBytes(certBytes)
+        ..usePrivateKeyBytes(keyBytes);
+      return HttpServer.bindSecure(
+        InternetAddress.loopbackIPv4,
+        port,
+        ctx,
+      );
+    }
+    return HttpServer.bind(InternetAddress.loopbackIPv4, port);
   }
 
   /// 生成 32 字节密码学安全随机 Token
@@ -80,8 +119,14 @@ class HttpServerService {
   }
 
   void _handleRequest(HttpRequest req) {
+    final clientIp = _clientIp(req);
+
+    // ── 速率限制检查（放在最前面）───────────────────
+    final blocked = _checkRateLimit(clientIp, req);
+    if (blocked) return;
+
     final path = req.uri.path;
-    print('[HTTP] ${req.method} $path');
+    print('[HTTP] ${req.method} $path from $clientIp');
     switch (path) {
       case '/ping':
         _respondOk(req, {'status': 'alive'});
@@ -115,34 +160,75 @@ class HttpServerService {
     }
   }
 
-  // ── SAFE_MODE 安全校验 ──────────────────────────────
+  // ── 速率限制 ──────────────────────────────────────
 
-  /// 检查请求是否有合法授权
-  bool _isAuthorized(HttpRequest req) {
-    // 1. 检查 x-auth-token 请求头
-    final token = req.headers.value('x-auth-token');
-    if (token != null && token == _authToken) return true;
+  String _clientIp(HttpRequest req) =>
+      req.connectionInfo?.remoteAddress.address ?? 'unknown';
 
-    // 2. 检查 URL query 参数 token
-    final queryToken = req.uri.queryParameters['token'];
-    if (queryToken != null && queryToken == _authToken) return true;
-
+  /// 检查速率限制，返回 true 表示已封禁（已回 429）
+  bool _checkRateLimit(String ip, HttpRequest req) {
+    final entry = _rateLimit[ip];
+    if (entry != null && entry.blockedUntil > DateTime.now().millisecondsSinceEpoch) {
+      _addAuditLog('RATE_LIMIT', 'BLOCKED', ip);
+      req.response
+        ..statusCode = 429
+        ..headers.contentType = ContentType.json
+        ..write(jsonEncode({
+          'error': 'too_many_requests',
+          'message': 'Too many failed attempts. Try again in '
+              '${((entry.blockedUntil - DateTime.now().millisecondsSinceEpoch) / 1000).ceil()}s.',
+        }))
+        ..close();
+      return true;
+    }
+    // 如果过了封禁时间，清除记录
+    if (entry != null &&
+        entry.blockedUntil <= DateTime.now().millisecondsSinceEpoch) {
+      _rateLimit.remove(ip);
+    }
     return false;
   }
 
-  /// 检查是否为测试模式请求（x-test-mode 头）
-  bool _isTestMode(HttpRequest req) {
-    return req.headers.value('x-test-mode') != null ||
-        req.headers.value('x-safe-mode') != null;
+  /// 记录一次失败，超过阈值则封禁
+  void _recordFailure(String ip) {
+    final entry = _rateLimit.putIfAbsent(ip, () => RateEntry(0, 0));
+    entry.failures++;
+    if (entry.failures >= _maxFailures) {
+      entry.blockedUntil = DateTime.now().millisecondsSinceEpoch + _blockDurationMs;
+      print('[HTTP] 🔴 IP $ip BLOCKED for 60s (failures: ${entry.failures})');
+    }
   }
 
-  /// 危险指令安全校验：返回 true 表示允许执行，false 表示拦截
-  bool _checkDangerousAction(HttpRequest req, String action) {
-    final clientIp = req.connectionInfo?.remoteAddress.address ?? 'unknown';
+  /// 记录一次成功，清除该 IP 的限制记录
+  void _recordSuccess(String ip) {
+    _rateLimit.remove(ip);
+  }
 
-    // 1. SAFE_MODE 检查
+  // ── 授权 & SAFE_MODE 检查 ────────────────────────
+
+  bool _isAuthorized(HttpRequest req) {
+    final token = req.headers.value('x-auth-token');
+    if (token != null && token == _authToken) {
+      _recordSuccess(_clientIp(req));
+      return true;
+    }
+    final queryToken = req.uri.queryParameters['token'];
+    if (queryToken != null && queryToken == _authToken) {
+      _recordSuccess(_clientIp(req));
+      return true;
+    }
+    _recordFailure(_clientIp(req));
+    return false;
+  }
+
+  bool _isTestMode(HttpRequest req) =>
+      req.headers.value('x-test-mode') != null ||
+      req.headers.value('x-safe-mode') != null;
+
+  bool _checkDangerousAction(HttpRequest req, String action) {
+    final clientIp = _clientIp(req);
+
     if (_safeMode) {
-      // 测试模式下仅记录，不执行
       if (_isTestMode(req)) {
         _addAuditLog(action, 'BLOCKED_BY_SAFE_MODE_TEST', clientIp);
         _respondOk(req, {
@@ -153,14 +239,12 @@ class HttpServerService {
         });
         return false;
       }
-      // 非 test-mode 直接拒绝
       _addAuditLog(action, 'BLOCKED_BY_SAFE_MODE', clientIp);
       _respondForbidden(
           req, 'SAFE_MODE is enabled. Action "$action" is blocked.');
       return false;
     }
 
-    // 2. 授权检查
     if (!_isAuthorized(req)) {
       _addAuditLog(action, 'UNAUTHORIZED', clientIp);
       _respondForbidden(req,
@@ -168,12 +252,10 @@ class HttpServerService {
       return false;
     }
 
-    // 3. 审计日志
     _addAuditLog(action, 'EXECUTED', clientIp);
     return true;
   }
 
-  /// 添加审计日志
   void _addAuditLog(String action, String result, String clientIp) {
     _auditLog.add({
       'action': action,
@@ -182,13 +264,12 @@ class HttpServerService {
       'safeMode': _safeMode,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     });
-    // 保留最近 100 条，使用安全写法避免并发竞态导致 removeRange 越界
     while (_auditLog.length > 100) {
       _auditLog.removeAt(0);
     }
   }
 
-  // ── 危险指令处理 ──────────────────────────────────
+  // ── 危险指令处理 ────────────────────────────────────
 
   void _handleShutdown(HttpRequest req) {
     if (!_checkDangerousAction(req, 'shutdown')) return;
@@ -216,7 +297,7 @@ class HttpServerService {
     });
   }
 
-  // ── 安全查询端点 ─────────────────────────────────
+  // ── 安全查询端点 ────────────────────────────────────
 
   void _handleSafeModeQuery(HttpRequest req) {
     _respondOk(req, {
@@ -228,24 +309,22 @@ class HttpServerService {
   }
 
   void _handleAuthTokenRequest(HttpRequest req) {
-    // 仅本地访问可获取 Token
-    final clientIp = req.connectionInfo?.remoteAddress.address ?? '';
+    final clientIp = _clientIp(req);
     final isLocal = clientIp == '127.0.0.1' ||
         clientIp == '::1' ||
         clientIp == '0:0:0:0:0:0:0:1';
+
     if (!isLocal) {
       _respondForbidden(req, 'Token only available from localhost');
       return;
     }
 
-    // 额外验证 Host 头，防止 DNS 重绑定攻击
     final host = req.headers.value('host') ?? '';
     final isLocalHost = host.startsWith('127.0.0.1') ||
         host.startsWith('localhost') ||
         host.startsWith('::1') ||
-        host.isEmpty; // 本地请求可能没有 Host 头
+        host.isEmpty;
     if (!isLocalHost) {
-      // IP 是本地，但 Host 头不是本地 — 可能是 DNS 重绑定攻击
       _addAuditLog('AUTH_TOKEN', 'DNS_REBINDING_SUSPECT', clientIp);
       _respondForbidden(req, 'Suspicious Host header — possible DNS rebinding');
       return;
@@ -254,19 +333,19 @@ class HttpServerService {
     _respondOk(req, {
       'token': _authToken,
       'safeMode': _safeMode,
+      'scheme': req.uri.scheme,
     });
   }
 
-  // ── 平台命令映射 ──────────────────────────────────
+  // ── 平台命令映射 ────────────────────────────────────
 
-  /// 返回对应平台的 (command, arguments)
   (String, List<String>) _shutdownCmd() {
     if (Platform.isWindows) return ('shutdown', ['/s', '/t', '0']);
     if (Platform.isMacOS) {
       return ('osascript', ['-e', 'tell app "System Events" to shut down']);
     }
     if (Platform.isLinux) return ('systemctl', ['poweroff']);
-    return ('shutdown', ['/s', '/t', '0']); // fallback
+    return ('shutdown', ['/s', '/t', '0']);
   }
 
   (String, List<String>) _restartCmd() {
@@ -275,17 +354,17 @@ class HttpServerService {
       return ('osascript', ['-e', 'tell app "System Events" to restart']);
     }
     if (Platform.isLinux) return ('systemctl', ['reboot']);
-    return ('shutdown', ['/r', '/t', '0']); // fallback
+    return ('shutdown', ['/r', '/t', '0']);
   }
 
   (String, List<String>) _lockScreenCmd() {
     if (Platform.isWindows) return ('rundll32', ['user32.dll,LockWorkStation']);
     if (Platform.isMacOS) return ('pmset', ['displaysleepnow']);
     if (Platform.isLinux) return ('loginctl', ['lock-session']);
-    return ('rundll32', ['user32.dll,LockWorkStation']); // fallback
+    return ('rundll32', ['user32.dll,LockWorkStation']);
   }
 
-  // ── 心跳 / 自毁 ──────────────────────────────────
+  // ── 心跳 / 自毁 ────────────────────────────────────
 
   void _handleHeartbeat(HttpRequest req) {
     if (_selfDevice != null) _selfDevice!.markAlive();
@@ -328,10 +407,9 @@ class HttpServerService {
       ..close();
   }
 
-  // ── 审计日志查询 ──────────────────────────────────
+  // ── 审计日志查询 ────────────────────────────────────
 
   void _handleAuditLogRequest(HttpRequest req) {
-    // 需要授权才能查看审计日志
     if (!_isAuthorized(req) && !_isTestMode(req)) {
       _respondForbidden(req, 'Unauthorized. Provide x-auth-token header.');
       return;
@@ -346,4 +424,11 @@ class HttpServerService {
     _running = false;
     await _server?.close();
   }
+}
+
+/// 速率限制条目
+class RateEntry {
+  int failures;
+  int blockedUntil; // millisecondsSinceEpoch，0 表示未封禁
+  RateEntry(this.failures, this.blockedUntil);
 }

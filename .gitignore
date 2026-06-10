@@ -51,3 +51,6 @@ signaling-server/*.log
 # Build artifacts
 *.exe
 *.dll
+
+# Private key (never commit)
+assets/certs/key.pem
