@@ -69,6 +69,13 @@ class WebRtcConnectionService {
     'remote_self_destruct', 'pair', 'unpair',
   };
 
+  /// V7-09 修复：DataChannel 消息速率限制
+  /// 同一连接每秒最多允许 _maxMessagesPerSecond 条消息，防止泛洪攻击
+  static const int _maxMessagesPerSecond = 30;
+  int _messageCount = 0;
+  int _messageCountResetAt = 0; // 上次重置时间戳（ms）
+  static const int _messageWindowMs = 1000; // 1 秒窗口
+
   WebRtcState get state => _state;
 
   WebRtcConnectionService({
@@ -267,6 +274,18 @@ class WebRtcConnectionService {
   }
 
   void _handleDataChannelMessage(String data) {
+    // V7-09 修复：DataChannel 消息速率限制
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _messageCountResetAt >= _messageWindowMs) {
+      _messageCount = 0;
+      _messageCountResetAt = now;
+    }
+    _messageCount++;
+    if (_messageCount > _maxMessagesPerSecond) {
+      print('[WebRTC] ⛔ Rate limit exceeded: $_messageCount messages in ${now - _messageCountResetAt}ms');
+      return;
+    }
+
     try {
       final msg = jsonDecode(data) as Map<String, dynamic>;
       final cmd = msg['command'] as String?;
@@ -293,9 +312,19 @@ class WebRtcConnectionService {
   // ── 发送控制指令 ────────────────────────────────
 
   /// 通过 DataChannel 发送控制指令
+  /// V7-10 修复：出站指令也需通过白名单验证（与入站一致）
   void sendCommand(String command) {
     if (_dataChannel == null) {
       print('[WebRTC] DataChannel is null, cannot send: $command');
+      return;
+    }
+    // V7-10：出站指令安全校验（防止应用层代码绕过安全策略发送高危指令）
+    if (_blockedCommands.contains(command)) {
+      print('[WebRTC] ⛔ Outbound blocked command rejected: $command');
+      return;
+    }
+    if (!_allowedCommands.contains(command)) {
+      print('[WebRTC] ⛔ Outbound unknown command rejected: $command');
       return;
     }
     // flutter_webrtc 0.12.x: send() 直接接受 String

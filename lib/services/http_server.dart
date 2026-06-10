@@ -260,8 +260,9 @@ class HttpServerService {
 
   /// 严格检查 Host 头是否为本地地址（V5-06 修复：防 DNS rebinding 绕过）
   /// 正确解析 host:port 格式，防止 127.0.0.1.evil.com 类绕过
+  /// V7-自检-01 修复：空 Host 头不再视为本地（防 DNS rebinding 绕过）
   bool _isLocalHostHeader(String hostHeader) {
-    if (hostHeader.isEmpty) return true;
+    if (hostHeader.isEmpty) return false;
 
     // 解析 host:port — Host 头格式为 "hostname:port" 或 "hostname"
     String hostname;
@@ -492,9 +493,18 @@ class HttpServerService {
     return result == 0;
   }
 
-  bool _isTestMode(HttpRequest req) =>
-      req.headers.value('x-test-mode') != null ||
-      req.headers.value('x-safe-mode') != null;
+  /// V7-06 修复：测试模式头仅在 DEBUG 构建中可用（kDebugMode 编译时常量）
+  /// 生产环境中 x-test-mode / x-safe-mode 头不再绕过认证
+  bool _isTestMode(HttpRequest req) {
+    bool kDebugMode = false;
+    assert(() {
+      kDebugMode = true;
+      return true;
+    }());
+    if (!kDebugMode) return false;
+    return req.headers.value('x-test-mode') != null ||
+        req.headers.value('x-safe-mode') != null;
+  }
 
   bool _checkDangerousAction(HttpRequest req, String action) {
     final clientIp = _clientIp(req);
@@ -793,11 +803,9 @@ class HttpServerService {
       return;
     }
 
+    // V7-05 修复：统一使用 JSON 格式的 405 响应（与 V6-02 其他端点一致）
     if (req.method != 'POST') {
-      req.response
-        ..statusCode = 405
-        ..write('Method Not Allowed')
-        ..close();
+      _respondMethodNotAllowed(req);
       return;
     }
 
@@ -840,7 +848,14 @@ class HttpServerService {
   }
 
   /// 解除设备配对
+  /// V7-01 修复：必须使用 POST 方法（防止 GET 请求 CSRF 解绑设备）
   Future<void> _handleUnpairRequest(HttpRequest req) async {
+    // V7-01：危险操作必须使用 POST（与 /shutdown /restart /lock-screen 一致）
+    if (req.method != 'POST') {
+      _respondMethodNotAllowed(req);
+      return;
+    }
+
     if (!_isAuthorized(req)) {
       _respondForbidden(req, 'Unauthorized');
       return;

@@ -85,18 +85,20 @@ class DeviceWhitelist {
   /// 检查设备是否在白名单中
   /// 同时验证设备 ID + 指纹（防止单纯伪造设备 ID）
   ///
-  /// 安全策略（ATK-W06 修复）：
-  /// - 如果白名单中该设备有指纹，则请求必须提供匹配的指纹
-  /// - 如果白名单中该设备没有指纹（空字符串），则只验证 deviceId
-  /// - fingerprint 参数为必填，与白名单记录匹配才算通过
+  /// 安全策略（V7-02 修复）：
+  /// - 白名单中该设备有指纹 → 请求必须提供匹配的指纹
+  /// - 白名单中该设备无指纹（空字符串）→ 请求也必须提供非空指纹，但只做 deviceId 匹配
+  ///   （不再因 storedFingerprint 为空就直接放行，防止空指纹绕过白名单）
+  /// - fingerprint 参数为必填，不允许为空或 null
   bool isAllowed(String deviceId, {String? fingerprint}) {
     for (final d in _devices) {
       if (d[kDeviceId] == deviceId) {
         final storedFingerprint = d[kFingerprint] as String? ?? '';
-        // 白名单中该设备没有指纹 → 仅 deviceId 匹配即可
-        if (storedFingerprint.isEmpty) return true;
-        // 白名单中有指纹 → 请求必须提供且匹配
+        // V7-02 修复：请求必须提供非空指纹（杜绝空指纹绕过）
         if (fingerprint == null || fingerprint.isEmpty) return false;
+        // 白名单中该设备没有指纹 → 仅验证 deviceId 匹配 + 请求提供了非空指纹
+        if (storedFingerprint.isEmpty) return true;
+        // 白名单中有指纹 → 必须精确匹配
         return _constantTimeEqual(fingerprint, storedFingerprint);
       }
     }

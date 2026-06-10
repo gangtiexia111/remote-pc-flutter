@@ -12,11 +12,14 @@ class NativeSecurityBridge {
   /// 检测是否正在被调试（桌面端）
   /// Windows: IsDebuggerPresent() API
   /// macOS: sysctl kinfo_proc -> P_TRACED flag
+  /// V7-12 修复：调用失败时返回 true（fail-closed）
+  /// 安全检测应遵循"检测失败 = 已被攻击"原则
   static Future<bool> isBeingDebugged() async {
     try {
-      return await _channel.invokeMethod('isBeingDebugged') as bool? ?? false;
+      return await _channel.invokeMethod('isBeingDebugged') as bool? ?? true;
     } catch (_) {
-      return false;
+      // V7-12：MethodChannel 失败 → 认为正在被调试（fail-closed）
+      return true;
     }
   }
 
@@ -45,12 +48,20 @@ class NativeSecurityBridge {
   }
 
   /// 获取设备硬件指纹（原生层实现）
+  /// V7-03 修复：失败时返回唯一的 sentinel 值而非空字符串
+  /// 空字符串会与 device_whitelist 的空指纹检查冲突导致绕过
+  /// sentinel 格式: __UNAVAILABLE__ 前缀，不会与真实指纹冲突
   static Future<String> getHardwareFingerprint() async {
     try {
-      return await _channel.invokeMethod('getHardwareFingerprint') as String? ??
-          '';
+      final result = await _channel.invokeMethod('getHardwareFingerprint') as String?;
+      // V7-03：如果原生层返回空或 null，返回 sentinel 而非空串
+      if (result == null || result.isEmpty) {
+        return '__FINGERPRINT_UNAVAILABLE__';
+      }
+      return result;
     } catch (_) {
-      return '';
+      // V7-03：异常时也返回 sentinel（非空串），避免白名单空指纹绕过
+      return '__FINGERPRINT_UNAVAILABLE__';
     }
   }
 

@@ -228,18 +228,33 @@ class SignalingClient {
 
   // ── 房间操作 ──────────────────────────────────────
 
+  /// V7-11 修复：roomId 输入验证
+  /// 限制长度 1-64 字符，仅允许字母数字下划线连字符（防信令注入）
+  static final _roomIdRegex = RegExp(r'^[a-zA-Z0-9_-]{1,64}$');
+
+  bool _validateRoomId(String roomId) {
+    if (!_roomIdRegex.hasMatch(roomId)) {
+      print('[Signaling] ⛔ Invalid roomId: must be 1-64 chars, alphanumeric/underscore/hyphen only');
+      return false;
+    }
+    return true;
+  }
+
   /// 创建房间（作为 Host/主控端）
   void createRoom(String roomId) {
+    if (!_validateRoomId(roomId)) return;
     _send({'type': 'create_room', 'roomId': roomId});
   }
 
   /// 加入房间（作为 Guest/被控端）
   void joinRoom(String roomId) {
+    if (!_validateRoomId(roomId)) return;
     _send({'type': 'join_room', 'roomId': roomId});
   }
 
   /// 离开房间
   void leaveRoom(String roomId) {
+    if (!_validateRoomId(roomId)) return;
     _send({'type': 'leave_room', 'roomId': roomId});
   }
 
@@ -252,16 +267,19 @@ class SignalingClient {
 
   /// 发送 SDP Offer
   void sendOffer(String roomId, Map<String, dynamic> sdp) {
+    if (!_validateRoomId(roomId)) return;
     _send({'type': 'offer', 'roomId': roomId, 'sdp': sdp});
   }
 
   /// 发送 SDP Answer
   void sendAnswer(String roomId, Map<String, dynamic> sdp) {
+    if (!_validateRoomId(roomId)) return;
     _send({'type': 'answer', 'roomId': roomId, 'sdp': sdp});
   }
 
   /// 发送 ICE Candidate
   void sendIceCandidate(String roomId, Map<String, dynamic> candidate) {
+    if (!_validateRoomId(roomId)) return;
     _send({'type': 'ice_candidate', 'roomId': roomId, 'candidate': candidate});
   }
 

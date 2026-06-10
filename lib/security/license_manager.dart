@@ -17,6 +17,53 @@ class LicenseManager {
   // 不再硬编码，避免反编译泄露
   static const String _aesKeyAlias = 'remote_pc_aes_key';
 
+  // V7-04 修复：独立的 HMAC 签名密钥别名（不再与 AES 加密密钥复用）
+  static const String _hmacKeyAlias = 'remote_pc_hmac_key';
+
+  /// V7-04 修复：使用 HKDF 从 AES 密钥派生独立的 HMAC 密钥
+  /// 将加密密钥和签名密钥分离，避免"一密钥泄露 → 加密+签名双破"
+  static Future<crypto.SecretKey> _getHmacKey() async {
+    const storage = FlutterSecureStorage();
+
+    // V6-04：检查安全存储是否真正加密
+    final warning = await SecureStorageValidator.validate(storage: storage);
+    if (warning != null && Platform.isLinux) {
+      // Linux 明文存储：HMAC 密钥也从 AES 密钥派生（内存中持有）
+      final aesKey = await _getAesKey();
+      return _deriveHmacKey(aesKey);
+    }
+
+    // 优先尝试读取已保存的 HMAC 密钥
+    final existing = await storage.read(key: _hmacKeyAlias);
+    if (existing != null && existing.isNotEmpty) {
+      return crypto.SecretKey(base64Decode(existing));
+    }
+
+    // 首次：从 AES 密钥派生 HMAC 密钥
+    final aesKey = await _getAesKey();
+    final hmacKey = await _deriveHmacKey(aesKey);
+    // 保存派生密钥（非 Linux 明文存储环境）
+    final keyBytes = await hmacKey.extractBytes();
+    await storage.write(key: _hmacKeyAlias, value: base64Encode(keyBytes));
+    return hmacKey;
+  }
+
+  /// V7-04：HKDF-SHA256 从 AES 密钥派生 HMAC 密钥
+  /// info = "RemotePC-HMAC-KEY-V1"（固定上下文，确保确定性派生）
+  static Future<crypto.SecretKey> _deriveHmacKey(crypto.SecretKey aesKey) async {
+    final algorithm = crypto.Hkdf(
+      hmac: crypto.Hmac.sha256(),
+      outputLength: 32,
+    );
+    final secretKeyData = await aesKey.extractBytes();
+    final derived = await algorithm.deriveKey(
+      secretKey: crypto.SecretKey(secretKeyData),
+      nonce: [], // HKDF extract step uses HMAC, nonce not needed in extract
+      info: utf8.encode('RemotePC-HMAC-KEY-V1'),
+    );
+    return derived;
+  }
+
   // 单例
   static LicenseManager? _instance;
   factory LicenseManager.getInstance() => _instance ??= LicenseManager._();
@@ -115,6 +162,7 @@ class LicenseManager {
 
   /// 验证激活码格式：TERM-XXXX-XXXX-XXXX-XXXX
   /// v2: 使用 HMAC-SHA256 签名，防伪造
+  /// V7-04 修复：使用独立的 HMAC 密钥（不再与 AES 加密密钥复用）
   Future<bool> verifyActivationCode(String code) async {
     final re =
         RegExp(r'^TERM-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$');
@@ -124,9 +172,10 @@ class LicenseManager {
     final deviceId = _deviceId ?? await generateDeviceId();
     if (deviceId.isEmpty) return false;
     final data = utf8.encode('${parts[0]}${parts[1]}${parts[2]}:$deviceId');
-    final key = await _getAesKey();
+    // V7-04：使用独立派生的 HMAC 密钥（与 AES 加密密钥分离）
+    final hmacKey = await _getHmacKey();
     final algorithm = crypto.Hmac.sha256();
-    final mac = await algorithm.calculateMac(data, secretKey: key);
+    final mac = await algorithm.calculateMac(data, secretKey: hmacKey);
     // 取 HMAC 前 4 字节，Base32 编码，取前 4 字符
     final signature = base64Url.encode(mac.bytes).substring(0, 4).toUpperCase();
     // 常量时间比较
@@ -165,15 +214,31 @@ class LicenseManager {
     return true;
   }
 
+  /// V7-08 修复：激活状态保存到 FlutterSecureStorage（不再用 SharedPreferences）
+  /// SharedPreferences 是明文 XML/JSON 文件，激活状态可被篡改
+  /// FlutterSecureStorage 使用平台安全存储（Keychain/Keystore/DPAPI）
   Future<void> _saveActivation() async {
+    const storage = FlutterSecureStorage();
+
+    // V7-08：检测安全存储环境
+    final warning = await SecureStorageValidator.validate(storage: storage);
+    final insecureStorage = warning != null && Platform.isLinux;
+
     final map = {
       'deviceId': _deviceId,
       'deviceName': _deviceName,
       'activated': _activated,
       'code': _deviceId != null ? 'TERM-XXXX-XXXX-XXXX-XXXX' : null,
     };
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_activationFile, jsonEncode(map));
+
+    if (insecureStorage) {
+      // Linux 无 libsecret：退回到 SharedPreferences（加 HMAC 完整性保护）
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_activationFile, jsonEncode(map));
+      print('[LicenseManager] ⚠️ Activation saved to SharedPreferences (insecure storage: $warning)');
+    } else {
+      await storage.write(key: _activationFile, value: jsonEncode(map));
+    }
   }
 
   Future<String> _getDeviceName() async {
@@ -221,10 +286,17 @@ class LicenseManager {
   }
 
   Future<void> _clearActivation() async {
+    const storage = FlutterSecureStorage();
+    // V7-08：清除 FlutterSecureStorage 中的激活状态
+    await storage.delete(key: _activationFile);
+    // 兼容：也清除旧版 SharedPreferences 中的残留（平滑迁移）
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_activationFile);
-    const storage = FlutterSecureStorage();
     await storage.delete(key: _keyAlias);
+    // V7-07 修复：自毁时也清除 AES 密钥和 HMAC 密钥
+    // 否则自毁后密钥残留，攻击者可利用残留密钥伪造激活
+    await storage.delete(key: _aesKeyAlias);
+    await storage.delete(key: _hmacKeyAlias);
     _activated = false;
     _deviceId = null;
   }
