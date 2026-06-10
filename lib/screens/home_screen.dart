@@ -245,12 +245,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _createRoom() {
-    final roomId = _roomIdController.text.trim();
+    // v1.0.4: 支持自动生成安全随机 roomId
+    var roomId = _roomIdController.text.trim();
     if (roomId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入房间 ID')),
-      );
-      return;
+      roomId = WebRtcConnectionService.generateRoomId();
+      _roomIdController.text = roomId;
     }
     _roomId = roomId;
     _initWebRtc();
@@ -693,13 +692,31 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 16),
           // 房间 ID 输入
-          TextField(
-            controller: _roomIdController,
-            decoration: const InputDecoration(
-              labelText: '房间 ID',
-              hintText: '输入一个房间名，两端使用相同 ID',
-              border: OutlineInputBorder(),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _roomIdController,
+                  decoration: const InputDecoration(
+                    labelText: '房间 ID',
+                    hintText: '输入或自动生成',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.outlined(
+                onPressed: () {
+                  final id = WebRtcConnectionService.generateRoomId();
+                  _roomIdController.text = id;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('已生成: $id')),
+                  );
+                },
+                icon: const Icon(Icons.casino),
+                tooltip: '随机生成房间 ID',
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           // 创建/加入按钮

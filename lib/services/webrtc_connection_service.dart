@@ -3,10 +3,16 @@
 /// WebRTC 跨网络连接管理服务
 /// 通过 Data Channel 传输控制指令
 /// 自动降级：LAN 优先，WebRTC 兜底
+///
+/// v1.0.4 增强：
+///   - 安全随机 roomId 生成
+///   - 自动重连（3 次，指数退避）
+///   - 连接超时（30s）
 library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'signaling_client.dart';
 
@@ -90,6 +96,89 @@ class WebRtcConnectionService {
     callbacks.onStateChanged?.call(s);
   }
 
+  // ── 安全随机 roomId 生成 ─────────────────────────
+
+  /// 生成安全随机 roomId（8 字符，字母数字）
+  /// 用于自动分配唯一房间标识，避免用户手动输入易重复/易猜测
+  static String generateRoomId() {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    final r = Random.secure();
+    return List.generate(8, (_) => chars[r.nextInt(chars.length)]).join();
+  }
+
+  // ── 自动重连 ──────────────────────────────────────
+
+  /// 最大重连次数
+  static const int _maxReconnectAttempts = 3;
+
+  /// 当前重连次数
+  int _reconnectAttempts = 0;
+
+  /// 重连定时器
+  Timer? _reconnectTimer;
+
+  /// 连接超时定时器
+  Timer? _connectTimeout;
+
+  /// 连接超时时间（秒）
+  static const int _connectTimeoutSec = 30;
+
+  /// 启动连接超时计时器
+  void _startConnectTimeout() {
+    _cancelConnectTimeout();
+    _connectTimeout = Timer(Duration(seconds: _connectTimeoutSec), () {
+      if (_state == WebRtcState.connecting) {
+        print('[WebRTC] ⏱️ Connection timeout (${_connectTimeoutSec}s)');
+        _setState(WebRtcState.failed);
+        _attemptReconnect();
+      }
+    });
+  }
+
+  /// 取消连接超时计时器
+  void _cancelConnectTimeout() {
+    _connectTimeout?.cancel();
+    _connectTimeout = null;
+  }
+
+  /// 尝试自动重连（指数退避：2s, 4s, 8s）
+  void _attemptReconnect() {
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      print('[WebRTC] ❌ Max reconnect attempts reached ($_maxReconnectAttempts)');
+      _setState(WebRtcState.failed);
+      return;
+    }
+
+    _reconnectAttempts++;
+    final delaySec = 2 * (1 << (_reconnectAttempts - 1)); // 2, 4, 8
+    print('[WebRTC] 🔄 Reconnecting in ${delaySec}s (attempt $_reconnectAttempts/$_maxReconnectAttempts)');
+
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(Duration(seconds: delaySec), () async {
+      if (_currentRoomId == null) return;
+      // 清理旧连接
+      _dataChannel?.close();
+      await _peerConnection?.close();
+      _peerConnection = null;
+      _dataChannel = null;
+      _setState(WebRtcState.connecting);
+      // 重新建立连接
+      if (_isHost) {
+        await createRoom(_currentRoomId!);
+      } else {
+        await joinRoom(_currentRoomId!);
+      }
+    });
+  }
+
+  /// 连接成功时重置重连计数
+  void _resetReconnect() {
+    _reconnectAttempts = 0;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _cancelConnectTimeout();
+  }
+
   // ── ICE Server 配置 ──────────────────────────────
 
   /// Google 免费 STUN + Metered.ca 免费 TURN
@@ -140,6 +229,7 @@ class WebRtcConnectionService {
     _isHost = true;
     _currentRoomId = roomId;
     _setState(WebRtcState.connecting);
+    _startConnectTimeout(); // v1.0.4: 连接超时
 
     await _createPeerConnection();
 
@@ -177,6 +267,7 @@ class WebRtcConnectionService {
     _isHost = false;
     _currentRoomId = roomId;
     _setState(WebRtcState.connecting);
+    _startConnectTimeout(); // v1.0.4: 连接超时
 
     await _createPeerConnection();
     _signalingClient!.joinRoom(roomId);
@@ -250,12 +341,14 @@ class WebRtcConnectionService {
     _peerConnection!.onConnectionState = (state) {
       print('[WebRTC] ConnectionState: $state');
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _resetReconnect(); // v1.0.4: 连接成功，重置重连计数
         _setState(WebRtcState.connected);
         callbacks.onConnected?.call(_currentRoomId ?? '');
       } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
           state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
         _setState(WebRtcState.failed);
         callbacks.onDisconnected?.call(_currentRoomId ?? '');
+        _attemptReconnect(); // v1.0.4: 自动重连
       }
     };
   }
@@ -340,6 +433,7 @@ class WebRtcConnectionService {
   // ── 断开 ────────────────────────────────────────
 
   Future<void> disconnect() async {
+    _resetReconnect(); // v1.0.4: 清理重连定时器
     _signalingClient?.leaveRoom(_currentRoomId ?? '');
     _signalingClient?.disconnect();
     _dataChannel?.close();
