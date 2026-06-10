@@ -184,11 +184,14 @@ class DynamicFirewall {
   /// Windows: IsDebuggerPresent()
   /// macOS: sysctl kinfo_proc -> P_TRACED flag
   /// Android: Debug.isDebuggerConnected()
+  /// V7-12 补丁：与 NativeSecurityBridge 保持 fail-closed 一致
   Future<bool> isBeingDebugged() async {
     try {
       return await NativeSecurityBridge.isBeingDebugged();
     } catch (_) {
-      return false; // 检测失败 → 不阻塞（调试检测不适用 fail-closed）
+      // V7-12 补丁：检测失败 → 认为正在被调试（fail-closed）
+      // 与 NativeSecurityBridge.isBeingDebugged() V7-12 修复保持一致
+      return true;
     }
   }
 
