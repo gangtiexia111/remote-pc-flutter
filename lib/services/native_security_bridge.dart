@@ -24,9 +24,9 @@ class NativeSecurityBridge {
   static Future<bool> verifySystemIntegrity() async {
     try {
       return await _channel.invokeMethod('verifySystemIntegrity') as bool? ??
-          true;
+          false; // 调用失败 → 认为不完整（安全优先）
     } catch (_) {
-      return true; // 隔离失败
+      return false; // 异常 → 认为不完整（安全优先）
     }
   }
 

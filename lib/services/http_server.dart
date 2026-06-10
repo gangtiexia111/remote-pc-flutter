@@ -103,7 +103,7 @@ class HttpServerService {
         ..useCertificateChainBytes(certBytes)
         ..usePrivateKeyBytes(keyBytes);
       return HttpServer.bindSecure(
-        InternetAddress.loopbackIPv4,
+        InternetAddress.anyIPv4,
         port,
         ctx,
       );
@@ -181,8 +181,10 @@ class HttpServerService {
         ..close();
       return true;
     }
-    // 如果过了封禁时间，清除记录
+    // 如果封禁已过期（blockedUntil > 0 且已过），清除记录
+    // 注意：blockedUntil=0 表示从未封禁（还在累积失败），不能清除
     if (entry != null &&
+        entry.blockedUntil > 0 &&
         entry.blockedUntil <= DateTime.now().millisecondsSinceEpoch) {
       _rateLimit.remove(ip);
     }
