@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'package:cryptography/cryptography.dart' as crypto;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../services/native_security_bridge.dart';
+import 'secure_storage_validator.dart';
 
 /// 动态多语言防火墙 — 桌面端防破解核心
 ///
@@ -33,19 +35,31 @@ class DynamicFirewall {
   DynamicFirewall._();
 
   /// 确保密钥已加载（懒初始化）
+  /// V6-自检：Linux 无 libsecret 时 HMAC 密钥仅驻留内存（不明文写入 JSON）
   Future<void> _ensureFirewallKey() async {
     if (_firewallKey != null) return;
     const storage = FlutterSecureStorage();
+
+    // V6-自检：检测安全存储环境
+    final warning = await SecureStorageValidator.validate(storage: storage);
+    final insecureStorage = warning != null && Platform.isLinux;
+
     final existing = await storage.read(key: _firewallKeyAlias);
-    if (existing != null && existing.isNotEmpty) {
+    if (existing != null && existing.isNotEmpty && !insecureStorage) {
       _firewallKey = crypto.SecretKey(base64Decode(existing));
       return;
     }
-    // 首次运行：生成随机密钥并安全存储
+
+    // 首次运行或不安全存储环境：生成随机密钥
     final keyBytes = List<int>.generate(32, (_) => _rng.nextInt(256));
-    await storage.write(key: _firewallKeyAlias, value: base64Encode(keyBytes));
+    if (insecureStorage) {
+      // V6-自检：不安全存储时密钥仅驻留内存，不持久化
+      print('[Firewall] ⚠️ HMAC key held in-memory only (insecure storage: $warning)');
+    } else {
+      await storage.write(key: _firewallKeyAlias, value: base64Encode(keyBytes));
+      print('[Firewall] HMAC key generated and stored securely');
+    }
     _firewallKey = crypto.SecretKey(keyBytes);
-    print('[Firewall] HMAC key generated and stored securely');
   }
 
   /// 生成动态验证挑战（每次调用结果不同）
@@ -102,9 +116,21 @@ class DynamicFirewall {
     return _constantTimeEqual(response, expected);
   }
 
-  /// 常量时间字符串比较（防时序攻击）
+  /// 常量时间字符串比较（防时序攻击 + 长度侧信道 V6-01 修复）
+  /// 即使长度不同，也执行相同次数的循环，防止通过时间差泄露长度信息
   bool _constantTimeEqual(String a, String b) {
-    if (a.length != b.length) return false;
+    if (a.length != b.length) {
+      // 仍执行完整循环（用较长字符串的长度），防止长度侧信道
+      final maxLen = a.length > b.length ? a.length : b.length;
+      // ignore: unused_local_variable
+      int dummy = 1;
+      for (int i = 0; i < maxLen; i++) {
+        final ac = i < a.length ? a.codeUnitAt(i) : 0;
+        final bc = i < b.length ? b.codeUnitAt(i) : 0;
+        dummy |= ac ^ bc;
+      }
+      return false; // 长度不同 → 一定不相等
+    }
     int result = 0;
     for (int i = 0; i < a.length; i++) {
       result |= a.codeUnitAt(i) ^ b.codeUnitAt(i);

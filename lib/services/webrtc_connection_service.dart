@@ -50,6 +50,25 @@ class WebRtcConnectionService {
   /// 是否是 Host（主控端）
   bool _isHost = false;
 
+  /// V6-05 修复：DataChannel 允许的指令白名单
+  /// 只允许安全控制指令，禁止通过 WebRTC 直接触发关机/重启等高危操作
+  static const _allowedCommands = {
+    'mouse_move', 'mouse_click', 'mouse_double_click',
+    'mouse_right_click', 'mouse_drag',
+    'key_press', 'key_combo', 'key_type',
+    'scroll_up', 'scroll_down',
+    'volume_up', 'volume_down', 'volume_mute',
+    'brightness_up', 'brightness_down',
+    'get_screen', 'get_clipboard', 'set_clipboard',
+    'ping', 'status', 'screenshot',
+  };
+
+  /// V6-05：通过 DataChannel 严禁的高危指令（必须通过 HTTP + 白名单 + Token）
+  static const _blockedCommands = {
+    'shutdown', 'restart', 'lock_screen', 'self_destruct',
+    'remote_self_destruct', 'pair', 'unpair',
+  };
+
   WebRtcState get state => _state;
 
   WebRtcConnectionService({
@@ -251,11 +270,23 @@ class WebRtcConnectionService {
     try {
       final msg = jsonDecode(data) as Map<String, dynamic>;
       final cmd = msg['command'] as String?;
-      if (cmd != null) {
-        callbacks.onCommandReceived?.call(_currentRoomId ?? '', cmd);
+      if (cmd == null) return;
+
+      // V6-05 修复：指令安全过滤
+      // 1. 高危指令严禁通过 DataChannel（必须走 HTTP + Token + 白名单）
+      if (_blockedCommands.contains(cmd)) {
+        print('[WebRTC] ⛔ Blocked dangerous command via DataChannel: $cmd');
+        return;
       }
+      // 2. 非白名单指令也拒绝
+      if (!_allowedCommands.contains(cmd)) {
+        print('[WebRTC] ⛔ Unknown command rejected: $cmd');
+        return;
+      }
+
+      callbacks.onCommandReceived?.call(_currentRoomId ?? '', cmd);
     } catch (e) {
-      print('[WebRTC] DataChannel message error: $e');
+      print('[WebRTC] DataChannel message error');
     }
   }
 

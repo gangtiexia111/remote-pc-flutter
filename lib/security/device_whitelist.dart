@@ -109,6 +109,7 @@ class DeviceWhitelist {
     if (a.length != b.length) {
       // 仍执行完整循环（用较长字符串的长度），防止长度侧信道
       final maxLen = a.length > b.length ? a.length : b.length;
+      // ignore: unused_local_variable
       int dummy = 1; // 预设为非零，确保最后返回 false
       for (int i = 0; i < maxLen; i++) {
         final ac = i < a.length ? a.codeUnitAt(i) : 0;

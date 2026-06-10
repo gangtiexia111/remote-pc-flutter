@@ -29,6 +29,13 @@ class SignalingCallbacks {
   });
 }
 
+/// V6-08：信令消息类型白名单（只接受已知消息类型）
+const _allowedMessageTypes = {
+  'offer', 'answer', 'ice_candidate', 'room_list',
+  'create_room', 'join_room', 'leave_room', 'list_rooms',
+  'error',
+};
+
 /// WebSocket 信令客户端
 class SignalingClient {
   final String serverUrl;
@@ -107,10 +114,36 @@ class SignalingClient {
   }
 
   /// 处理服务器消息
+  /// V6-08：添加消息结构验证（防恶意信令服务器注入伪造消息）
   void _handleMessage(dynamic raw) {
     try {
       final Map<String, dynamic> msg = jsonDecode(raw as String);
       final type = msg['type'] as String?;
+
+      // V6-08：消息类型白名单验证
+      if (type == null || !_allowedMessageTypes.contains(type)) {
+        print('[Signaling] ⛔ Rejected unknown message type: $type');
+        return;
+      }
+
+      // V6-08：结构验证 — 各消息类型必须包含的必要字段
+      switch (type) {
+        case 'offer':
+        case 'answer':
+          if (!_validateSdpMessage(msg)) return;
+          break;
+        case 'ice_candidate':
+          if (!_validateIceCandidateMessage(msg)) return;
+          break;
+        case 'room_list':
+          final rooms = msg['rooms'] as List<dynamic>? ?? [];
+          callbacks.onRoomList?.call(rooms);
+          return; // room_list 直接处理，不走下面的通用 switch
+        case 'error':
+          print('[Signaling] Server error: ${msg['message']}');
+          return;
+      }
+
       print('[Signaling] Received: $type');
 
       switch (type) {
@@ -120,17 +153,64 @@ class SignalingClient {
           callbacks.onAnswer?.call(msg);
         case 'ice_candidate':
           callbacks.onIceCandidate?.call(msg);
-        case 'room_list':
-          final rooms = msg['rooms'] as List<dynamic>? ?? [];
-          callbacks.onRoomList?.call(rooms);
-        case 'error':
-          print('[Signaling] Server error: ${msg['message']}');
-        default:
-          print('[Signaling] Unknown message type: $type');
       }
     } catch (e) {
-      print('[Signaling] Message parse error: $e');
+      print('[Signaling] Message parse error');
     }
+  }
+
+  /// V6-08：验证 SDP 消息结构
+  bool _validateSdpMessage(Map<String, dynamic> msg) {
+    final sdp = msg['sdp'];
+    if (sdp == null) {
+      print('[Signaling] ⛔ SDP message missing "sdp" field');
+      return false;
+    }
+    // sdp 必须是 Map 且包含 sdp 和 type 字段
+    if (sdp is! Map<String, dynamic>) {
+      print('[Signaling] ⛔ SDP field is not a Map');
+      return false;
+    }
+    final sdpStr = sdp['sdp'] as String?;
+    final sdpType = sdp['type'] as String?;
+    if (sdpStr == null || sdpType == null) {
+      print('[Signaling] ⛔ SDP missing "sdp" or "type" field');
+      return false;
+    }
+    // V6-08：SDP 类型必须合法
+    if (!{'offer', 'answer', 'pranswer', 'rollback'}.contains(sdpType)) {
+      print('[Signaling] ⛔ Invalid SDP type: $sdpType');
+      return false;
+    }
+    // V6-08：SDP 内容长度限制（防止注入超大 payload）
+    if (sdpStr.length > 65536) {
+      print('[Signaling] ⛔ SDP too large (${sdpStr.length} chars)');
+      return false;
+    }
+    return true;
+  }
+
+  /// V6-08：验证 ICE Candidate 消息结构
+  bool _validateIceCandidateMessage(Map<String, dynamic> msg) {
+    final candidate = msg['candidate'];
+    if (candidate == null) {
+      print('[Signaling] ⛔ ICE candidate message missing "candidate" field');
+      return false;
+    }
+    if (candidate is! Map<String, dynamic>) {
+      print('[Signaling] ⛔ Candidate field is not a Map');
+      return false;
+    }
+    final candidateStr = candidate['candidate'] as String?;
+    if (candidateStr == null) {
+      print('[Signaling] ⛔ ICE candidate missing "candidate" string');
+      return false;
+    }
+    if (candidateStr.length > 8192) {
+      print('[Signaling] ⛔ ICE candidate string too long');
+      return false;
+    }
+    return true;
   }
 
   /// 发送消息

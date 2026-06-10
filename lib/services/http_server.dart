@@ -62,8 +62,9 @@ class HttpServerService {
   /// 全局请求频率限制：IP → 最后请求时间戳
   final Map<String, int> _lastRequestTime = {};
 
-  /// 全局请求频率限制：同一 IP 每秒最多请求数
-  static const int _maxRequestsPerSecond = 10;
+  /// 全局请求频率限制：同一 IP 每秒最多请求数（V6-03：此字段已不再使用，
+  /// 实际通过 _minRequestIntervalMs 控制频率，但保留注释以防未来需要）
+  // static const int _maxRequestsPerSecond = 10;
 
   /// 全局请求最小间隔（ms）
   static const int _minRequestIntervalMs = 100;
@@ -404,9 +405,17 @@ class HttpServerService {
     }
   }
 
-  /// 记录一次成功，清除该 IP 的限制记录
+  /// 记录一次成功，降低但不清除该 IP 的限制记录
+  /// V6-03 修复：成功不再完全清除失败记录（防慢速暴力破解：3失败→成功→清零→再3失败）
+  /// 策略：每次成功减半失败次数（不归零），blockCount 永不减少（封禁递增是永久的）
+  /// 只当失败次数降为 0 时才移除记录
   void _recordSuccess(String ip) {
-    _rateLimit.remove(ip);
+    final entry = _rateLimit[ip];
+    if (entry == null) return;
+    entry.failures = entry.failures ~/ 2; // 减半而非清零
+    if (entry.failures == 0 && entry.blockCount == 0) {
+      _rateLimit.remove(ip); // 真正干净的记录才移除
+    }
   }
 
   /// 全局请求频率限制（防泛洪 ATK-W09）
@@ -559,6 +568,11 @@ class HttpServerService {
   // ── 危险指令处理 ────────────────────────────────────
 
   void _handleShutdown(HttpRequest req) {
+    // V6-02 修复：危险指令必须使用 POST 方法（防止 GET 请求触发 CSRF/意外关机）
+    if (req.method != 'POST') {
+      _respondMethodNotAllowed(req);
+      return;
+    }
     if (!_checkDangerousAction(req, 'shutdown')) return;
     final (cmd, args) = _shutdownCmd();
     Process.start(cmd, args);
@@ -567,6 +581,11 @@ class HttpServerService {
   }
 
   void _handleRestart(HttpRequest req) {
+    // V6-02 修复：危险指令必须使用 POST 方法
+    if (req.method != 'POST') {
+      _respondMethodNotAllowed(req);
+      return;
+    }
     if (!_checkDangerousAction(req, 'restart')) return;
     final (cmd, args) = _restartCmd();
     Process.start(cmd, args);
@@ -575,6 +594,11 @@ class HttpServerService {
   }
 
   void _handleLockScreen(HttpRequest req) {
+    // V6-02 修复：危险指令必须使用 POST 方法
+    if (req.method != 'POST') {
+      _respondMethodNotAllowed(req);
+      return;
+    }
     if (!_checkDangerousAction(req, 'lock_screen')) return;
     final (cmd, args) = _lockScreenCmd();
     Process.start(cmd, args);
@@ -665,6 +689,11 @@ class HttpServerService {
   }
 
   Future<void> _handleRemoteSelfDestruct(HttpRequest req) async {
+    // V6-02 修复：危险指令必须使用 POST 方法
+    if (req.method != 'POST') {
+      _respondMethodNotAllowed(req);
+      return;
+    }
     if (!_checkDangerousAction(req, 'remote_self_destruct')) return;
     final lm = LicenseManager.getInstance();
     await lm.selfDestruct('remote_command');
@@ -715,6 +744,16 @@ class HttpServerService {
       ..statusCode = 404
       ..headers.contentType = ContentType.json
       ..write(jsonEncode({'error': 'not_found'}))
+      ..close();
+  }
+
+  // V6-02：405 Method Not Allowed（危险端点只接受 POST）
+  void _respondMethodNotAllowed(HttpRequest req) {
+    req.response
+      ..statusCode = 405
+      ..headers.contentType = ContentType.json
+      ..headers.add('Allow', 'POST')
+      ..write(jsonEncode({'error': 'method_not_allowed', 'message': 'Dangerous actions require POST method'}))
       ..close();
   }
 

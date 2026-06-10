@@ -2,8 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'secure_storage_validator.dart';
 
-/// TLS 证书管理器 — 运行时生成自签名证书（V5-02 修复）
+/// TLS 证书管理器 — 运行时生成自签名证书（V5-02 修复，V6-06 加固，V6-自检 加固）
 ///
 /// 安全策略：
 /// 1. 首次启动时生成 RSA-2048 自签名证书（通过 openssl 子进程）
@@ -11,6 +12,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// 3. 后续启动从安全存储加载
 /// 4. 证书包含设备指纹，每台设备唯一
 /// 5. 如果 openssl 不可用，降级到 HTTP（不使用不安全的固定证书）
+/// 6. V6-06：不再使用 -nodes 标志，私钥通过 passphrase 保护写入磁盘
+///    passphrase 随机生成，仅存在于内存中
+/// 7. V6-自检：Linux 上检测安全存储是否可用，不可用时私钥仅驻留内存
 class CertificateManager {
   static const String _certStorageKey = 'remote_pc_tls_cert_pem';
   static const String _keyStorageKey = 'remote_pc_tls_key_pem';
@@ -27,6 +31,9 @@ class CertificateManager {
   String? keyPem;
   String? fingerprint;
 
+  /// V6-自检：标记是否检测到不安全存储环境（Linux 无 libsecret）
+  bool _insecureStorageDetected = false;
+
   /// 证书是否已加载
   bool get isLoaded => certPem != null && keyPem != null;
 
@@ -34,8 +41,18 @@ class CertificateManager {
   ///
   /// 返回 true 表示成功加载证书，false 表示降级到 HTTP
   Future<bool> loadOrGenerate() async {
+    // V6-自检：检测安全存储是否可用（Linux 无 libsecret 时私钥明文存储）
+    final storageWarning = await SecureStorageValidator.validate(storage: _storage);
+    if (storageWarning != null) {
+      _insecureStorageDetected = true;
+      print('[TLS] ⚠️ $storageWarning');
+      if (Platform.isLinux) {
+        print('[TLS] ⚠️ Private key will be held in-memory only (not persisted to insecure storage)');
+      }
+    }
+
     // 1. 尝试从安全存储加载
-    if (await _loadFromSecureStorage()) {
+    if (!_insecureStorageDetected && await _loadFromSecureStorage()) {
       print('[TLS] ✅ Certificate loaded from secure storage');
       return true;
     }
@@ -88,6 +105,7 @@ class CertificateManager {
   }
 
   /// 通过 openssl 子进程生成自签名证书
+  /// V6-06 加固：不再使用 -nodes 标志（私钥用随机 passphrase 加密写入磁盘）
   Future<bool> _generateViaOpenSSL() async {
     try {
       // 检查 openssl 是否可用
@@ -105,10 +123,16 @@ class CertificateManager {
       final certFile = File('${tempDir.path}/cert.pem');
       final keyFile = File('${tempDir.path}/key.pem');
 
+      // V6-06：生成随机 passphrase 保护私钥（不再用 -nodes）
+      final passphraseBytes = List<int>.generate(32, (_) => Random.secure().nextInt(256));
+      final passphrase = base64Encode(passphraseBytes);
+      final passphraseFile = File('${tempDir.path}/passphrase.txt');
+      await passphraseFile.writeAsString(passphrase);
+
       // 生成设备唯一标识（用于证书 CN）
       final deviceId = _generateDeviceId();
 
-      // 执行 openssl 生成自签名证书
+      // V6-06：使用 -passout file: 保护私钥（不再 -nodes 明文写磁盘）
       final result = await Process.run('openssl', [
         'req',
         '-x509',
@@ -120,7 +144,8 @@ class CertificateManager {
         certFile.path,
         '-days',
         '365',
-        '-nodes',
+        '-passout',
+        'file:${passphraseFile.path}', // V6-06：私钥加密保护
         '-subj',
         '/CN=RemotePC-$deviceId/O=RemotePC/C=US',
       ]);
@@ -131,9 +156,24 @@ class CertificateManager {
         return false;
       }
 
-      // 读取生成的证书和私钥
+      // V6-06：用 passphrase 解密私钥后读入内存（磁盘上始终是加密的）
+      final decryptResult = await Process.run('openssl', [
+        'rsa',
+        '-in',
+        keyFile.path,
+        '-passin',
+        'file:${passphraseFile.path}',
+      ]);
+
+      if (decryptResult.exitCode != 0) {
+        print('[TLS] Key decryption failed');
+        await _cleanupTemp(tempDir);
+        return false;
+      }
+
+      // 读取证书和已解密的私钥
       certPem = await certFile.readAsString();
-      keyPem = await keyFile.readAsString();
+      keyPem = decryptResult.stdout.toString();
 
       // 计算证书指纹
       fingerprint = await _computeFingerprint(certFile.path);
@@ -141,7 +181,7 @@ class CertificateManager {
       // 保存到安全存储
       await _saveToSecureStorage();
 
-      // 清理临时文件（重要：删除磁盘上的私钥！）
+      // 清理临时文件（V6-06：包括 passphrase 文件，多重覆写）
       await _cleanupTemp(tempDir);
 
       return true;
@@ -199,9 +239,16 @@ class CertificateManager {
   }
 
   /// 保存证书和私钥到安全存储
+  /// V6-自检：不安全存储环境下不保存私钥（仅驻留内存，重启后重新生成）
   Future<void> _saveToSecureStorage() async {
     await _storage.write(key: _certStorageKey, value: certPem);
-    await _storage.write(key: _keyStorageKey, value: keyPem);
+    if (_insecureStorageDetected) {
+      // V6-自检：Linux 无 libsecret 时私钥不能明文存储到 JSON 文件
+      print('[TLS] ⚠️ Private key NOT persisted (insecure storage environment detected)');
+      // 私钥仅驻留内存，下次重启需重新生成证书
+    } else {
+      await _storage.write(key: _keyStorageKey, value: keyPem);
+    }
     await _storage.write(key: _certFingerprintKey, value: fingerprint);
     await _storage.write(
       key: _certGeneratedAtKey,
@@ -220,7 +267,7 @@ class CertificateManager {
     fingerprint = null;
   }
 
-  /// 清理临时目录（安全删除私钥文件）
+  /// 清理临时目录（安全删除私钥文件和 passphrase 文件）
   Future<void> _cleanupTemp(Directory dir) async {
     try {
       // 先覆写私钥文件（防止文件恢复）
@@ -230,6 +277,14 @@ class CertificateManager {
         final randomData = List<int>.generate(2048, (_) => r.nextInt(256));
         await keyFile.writeAsBytes(randomData);
         await keyFile.delete();
+      }
+      // V6-06 自检：覆写 passphrase 文件后再删除（防止文件恢复获取密钥保护密码）
+      final passphraseFile = File('${dir.path}/passphrase.txt');
+      if (await passphraseFile.exists()) {
+        final r = Random.secure();
+        final randomData = List<int>.generate(2048, (_) => r.nextInt(256));
+        await passphraseFile.writeAsBytes(randomData);
+        await passphraseFile.delete();
       }
       final certFile = File('${dir.path}/cert.pem');
       if (await certFile.exists()) {

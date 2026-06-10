@@ -5,6 +5,7 @@ import 'package:cryptography/cryptography.dart' as crypto;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_storage_validator.dart';
 
 /// 授权管理器 — 对应原 Java 版 LicenseManager.java
 /// 支持 AES-256-GCM 激活码验证，支持 Android/iOS/Desktop 三端
@@ -23,8 +24,23 @@ class LicenseManager {
 
   /// 从平台安全存储获取 AES-256 密钥
   /// 首次运行时生成并保存到 FlutterSecureStorage（各平台安全存储）
+  /// V6-04 修复：检测 Linux 安全存储降级（AES 密钥明文存储是灾难级）
   static Future<crypto.SecretKey> _getAesKey() async {
     const storage = FlutterSecureStorage();
+
+    // V6-04：检查安全存储是否真正加密
+    final warning = await SecureStorageValidator.validate(storage: storage);
+    if (warning != null) {
+      print('[LicenseManager] ⚠️ $warning');
+      // Linux 明文存储不保存 AES 密钥 → 仅内存中持有（应用重启后重新生成）
+      // 这意味着每次重启都需要重新激活，但避免了密钥泄露
+      if (Platform.isLinux) {
+        final keyBytes = List<int>.generate(32, (_) => Random.secure().nextInt(256));
+        print('[LicenseManager] AES key generated in-memory only (unsafe storage detected)');
+        return crypto.SecretKey(keyBytes);
+      }
+    }
+
     final existing = await storage.read(key: _aesKeyAlias);
     if (existing != null && existing.isNotEmpty) {
       return crypto.SecretKey(base64Decode(existing));
@@ -117,9 +133,21 @@ class LicenseManager {
     return _constantTimeEqual(parts[3], signature);
   }
 
-  /// 常量时间字符串比较（防时序攻击）
+  /// 常量时间字符串比较（防时序攻击 + 长度侧信道 V6-01 修复）
+  /// 即使长度不同，也执行相同次数的循环，防止通过时间差泄露长度信息
   bool _constantTimeEqual(String a, String b) {
-    if (a.length != b.length) return false;
+    if (a.length != b.length) {
+      // 仍执行完整循环（用较长字符串的长度），防止长度侧信道
+      final maxLen = a.length > b.length ? a.length : b.length;
+      // ignore: unused_local_variable
+      int dummy = 1;
+      for (int i = 0; i < maxLen; i++) {
+        final ac = i < a.length ? a.codeUnitAt(i) : 0;
+        final bc = i < b.length ? b.codeUnitAt(i) : 0;
+        dummy |= ac ^ bc;
+      }
+      return false; // 长度不同 → 一定不相等
+    }
     int result = 0;
     for (int i = 0; i < a.length; i++) {
       result |= a.codeUnitAt(i) ^ b.codeUnitAt(i);

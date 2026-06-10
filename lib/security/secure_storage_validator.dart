@@ -74,7 +74,7 @@ class SecureStorageValidator {
   static Future<bool> performReadWriteTest(
       {FlutterSecureStorage? storage}) async {
     storage ??= const FlutterSecureStorage();
-    const testKey = '__security_test_${DateTime.now().millisecondsSinceEpoch}';
+    final testKey = '__security_test_${DateTime.now().millisecondsSinceEpoch}';
     const testValue = 'test_value_12345';
 
     try {

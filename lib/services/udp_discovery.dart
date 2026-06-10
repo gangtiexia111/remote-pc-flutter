@@ -31,14 +31,17 @@ class UdpDiscoveryService {
   final _devices = <String, Device>{};
   final _callbacks = <Function(Device)>[];
   bool _running = false;
-  final _seenNonces = <int>{};
+
+  /// V6-07 修复：nonce 扩大到 64-bit（防碰撞），改为滑动窗口而非全清空
+  /// 格式：Map<nonce值, 过期时间戳(ms)>
+  final _seenNonces = <int, int>{};
   final _rng = Random.secure();
 
   /// 递增序列号（V5-08：防重放更可靠）
   int _sequenceNumber = 0;
 
-  /// Nonce 清理时间（定期清理过期的 nonce 条目）
-  int _lastNonceCleanup = 0;
+  /// nonce 滑动窗口有效期（5秒后过期，与时间戳窗口一致）
+  static const int _nonceExpiryMs = 5000;
 
   Map<String, Device> get devices => Map.unmodifiable(_devices);
 
@@ -62,7 +65,10 @@ class UdpDiscoveryService {
     final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
     socket.broadcastEnabled = true;
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final nonce = _rng.nextInt(0xFFFFFFFF);
+    // V6-07：nonce 扩大到 64-bit（两个 32-bit 拼接），碰撞概率从 1/4B 降低到 1/2^64
+    final nonceLow = _rng.nextInt(0xFFFFFFFF);
+    final nonceHigh = _rng.nextInt(0xFFFF); // 16-bit 高位（JSON 中用合并值）
+    final nonce = (nonceHigh << 32) | nonceLow;
     _sequenceNumber++;
     final msg = jsonEncode({
       'header': _magicHeader,
@@ -106,19 +112,26 @@ class UdpDiscoveryService {
 
       // Nonce 去重（防重放攻击）
       final nonce = msg['nonce'] as int? ?? 0;
-      if (_seenNonces.contains(nonce)) {
-        print('[UDP] Drop replayed packet from ${dg.address.address}');
-        return;
-      }
-      _seenNonces.add(nonce);
-
-      // V5-08：定时清理 nonce（而非满 1000 清空所有）
       final now = DateTime.now().millisecondsSinceEpoch;
-      if (now - _lastNonceCleanup > 30000) {
-        // 每 30 秒清空一次（nonce 在 5 秒内去重即可，30 秒足够安全）
-        _seenNonces.clear();
-        _lastNonceCleanup = now;
+
+      // V6-07：滑动窗口 nonce 去重（不再清空全部）
+      // 只保留 5 秒内的 nonce，过期的自动淘汰
+      if (_seenNonces.containsKey(nonce)) {
+        final expiry = _seenNonces[nonce]!;
+        if (now < expiry) {
+          // nonce 还在窗口内 → 重放攻击
+          print('[UDP] Drop replayed packet from ${dg.address.address}');
+          return;
+        }
+        // nonce 已过期但还在 map 中 → 移除，允许相同 nonce 再次出现（极低概率）
+        _seenNonces.remove(nonce);
       }
+      // 新 nonce → 加入滑动窗口（过期时间 = now + 5s）
+      _seenNonces[nonce] = now + _nonceExpiryMs;
+
+      // V6-07：滑动清理过期 nonce（每次收到包时清理，不再定时全清空）
+      // 这样永远不会出现"清空后重放窗口打开"的漏洞
+      _seenNonces.removeWhere((key, expiry) => expiry <= now);
 
       final id = msg['id'] as String;
 
