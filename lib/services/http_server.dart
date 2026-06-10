@@ -182,9 +182,9 @@ class HttpServerService {
       'safeMode': _safeMode,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     });
-    // 保留最近 100 条
-    if (_auditLog.length > 100) {
-      _auditLog.removeRange(0, _auditLog.length - 100);
+    // 保留最近 100 条，使用安全写法避免并发竞态导致 removeRange 越界
+    while (_auditLog.length > 100) {
+      _auditLog.removeAt(0);
     }
   }
 
@@ -262,16 +262,18 @@ class HttpServerService {
   /// 返回对应平台的 (command, arguments)
   (String, List<String>) _shutdownCmd() {
     if (Platform.isWindows) return ('shutdown', ['/s', '/t', '0']);
-    if (Platform.isMacOS)
+    if (Platform.isMacOS) {
       return ('osascript', ['-e', 'tell app "System Events" to shut down']);
+    }
     if (Platform.isLinux) return ('systemctl', ['poweroff']);
     return ('shutdown', ['/s', '/t', '0']); // fallback
   }
 
   (String, List<String>) _restartCmd() {
     if (Platform.isWindows) return ('shutdown', ['/r', '/t', '0']);
-    if (Platform.isMacOS)
+    if (Platform.isMacOS) {
       return ('osascript', ['-e', 'tell app "System Events" to restart']);
+    }
     if (Platform.isLinux) return ('systemctl', ['reboot']);
     return ('shutdown', ['/r', '/t', '0']); // fallback
   }

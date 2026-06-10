@@ -177,7 +177,13 @@ class SignalingClient {
   void _tryReconnect() {
     if (!_shouldReconnect) return;
     if (_reconnectAttempts >= _maxReconnectAttempts) {
-      print('[Signaling] Max reconnect attempts reached');
+      // 超过最大重试次数后，切换为每 5 分钟轮询，而非永久放弃
+      print('[Signaling] Max retries reached, switching to slow poll (5min)');
+      _reconnectTimer?.cancel();
+      _reconnectTimer = Timer(const Duration(minutes: 5), () {
+        _reconnectAttempts = 0; // 重置计数，允许重新指数退避
+        _doConnect();
+      });
       return;
     }
 

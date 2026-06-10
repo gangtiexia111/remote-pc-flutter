@@ -79,6 +79,11 @@ class LicenseManager {
 
   /// AES-256-GCM 解密
   Future<String> decryptAesGcm(List<int> data) async {
+    // 最小长度：12 字节 nonce + 0 字节明文 + 16 字节 MAC = 28 字节
+    if (data.length < 28) {
+      throw ArgumentError(
+          'Invalid ciphertext: too short (${data.length} bytes, min 28)');
+    }
     final algorithm = crypto.AesGcm.with256bits();
     final secretKey = await _getAesKey();
     final result = await algorithm.decrypt(
@@ -99,8 +104,8 @@ class LicenseManager {
         RegExp(r'^TERM-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$');
     if (!re.hasMatch(code)) return false;
     final parts = code.split('-').sublist(1);
-    // 计算前 3 段 + 设备 ID 的 HMAC（绑定设备，防滥用）
-    final deviceId = _deviceId ?? '';
+    // 获取 deviceId：优先用已有的，否则先生成（首次激活场景）
+    final deviceId = _deviceId ?? await generateDeviceId();
     if (deviceId.isEmpty) return false;
     final data = utf8.encode('${parts[0]}${parts[1]}${parts[2]}:$deviceId');
     final key = await _getAesKey();

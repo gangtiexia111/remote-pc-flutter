@@ -77,7 +77,8 @@ class UdpDiscoveryService {
         return;
       }
       _seenNonces.add(nonce);
-      if (_seenNonces.length > 1000) _seenNonces.remove(_seenNonces.first);
+      // 使用 clear() 替代 remove(first)，避免 HashSet 无序性导致的 bug
+      if (_seenNonces.length > 1000) _seenNonces.clear();
 
       final id = msg['id'] as String;
       if (_devices.containsKey(id)) {
