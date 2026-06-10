@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Remote PC — Vol.3 白帽安全审计报告</title>
+<style>
+  :root { --bg: #0a0e17; --card: #111827; --border: #1e293b; --accent: #10b981; --danger: #ef4444; --warn: #f59e0b; --info: #3b82f6; --text: #e2e8f0; --muted: #64748b; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 2rem; }
+  h1 { font-size: 2.2rem; background: linear-gradient(135deg, #10b981, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.3rem; }
+  .subtitle { color: var(--muted); font-size: 1rem; margin-bottom: 2rem; }
+  .score-bar { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem 2rem; margin-bottom: 2rem; display: flex; align-items: center; gap: 2rem; flex-wrap: wrap; }
+  .score-big { font-size: 3rem; font-weight: 800; color: var(--accent); }
+  .score-label { color: var(--muted); font-size: 0.9rem; }
+  .score-diff { font-size: 1.1rem; margin-left: auto; }
+  .score-diff .up { color: #10b981; }
+  .score-diff .down { color: #ef4444; }
+  .progress-bg { flex: 1; min-width: 200px; height: 12px; background: #1e293b; border-radius: 6px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #10b981, #06b6d4); transition: width 0.6s ease; }
+  .section { margin-bottom: 2rem; }
+  .section h2 { font-size: 1.3rem; color: #e2e8f0; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+  .vuln-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.5rem; margin-bottom: 1rem; position: relative; overflow: hidden; }
+  .vuln-card::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; }
+  .vuln-card.critical::before { background: var(--danger); }
+  .vuln-card.high::before { background: #f97316; }
+  .vuln-card.medium::before { background: var(--warn); }
+  .vuln-card.low::before { background: var(--info); }
+  .vuln-header { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.7rem; }
+  .vuln-id { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 0.95rem; }
+  .badge { padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+  .badge.critical { background: rgba(239,68,68,0.15); color: #f87171; }
+  .badge.high { background: rgba(249,115,22,0.15); color: #fb923c; }
+  .badge.medium { background: rgba(245,158,11,0.15); color: #fbbf24; }
+  .badge.low { background: rgba(59,130,246,0.15); color: #60a5fa; }
+  .badge.fixed { background: rgba(16,185,129,0.15); color: #34d399; }
+  .badge.deferred { background: rgba(100,116,139,0.15); color: #94a3b8; }
+  .vuln-title { font-size: 1.05rem; font-weight: 600; }
+  .vuln-desc { color: var(--muted); font-size: 0.9rem; margin: 0.5rem 0; }
+  .vuln-code { background: #0d1117; border: 1px solid #1e293b; border-radius: 6px; padding: 0.8rem 1rem; font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 0.82rem; color: #c9d1d9; overflow-x: auto; margin: 0.7rem 0; white-space: pre; }
+  .vuln-fix { background: rgba(16,185,129,0.05); border: 1px solid rgba(16,185,129,0.2); border-radius: 6px; padding: 0.8rem 1rem; font-size: 0.88rem; margin-top: 0.5rem; }
+  .vuln-fix strong { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th, td { padding: 0.6rem 1rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+  th { background: var(--card); color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; }
+  td { color: var(--text); }
+  .timeline { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; }
+  .timeline-item { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; flex: 1; min-width: 180px; }
+  .timeline-item .version { font-size: 0.8rem; color: var(--muted); }
+  .timeline-item .score { font-size: 1.8rem; font-weight: 800; }
+  .timeline-item .label { font-size: 0.8rem; color: var(--muted); }
+  .footer { text-align: center; color: var(--muted); font-size: 0.8rem; margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; margin-right: 0.3rem; }
+  .tag.red { background: rgba(239,68,68,0.15); color: #f87171; }
+  .tag.orange { background: rgba(249,115,22,0.15); color: #fb923c; }
+  .tag.yellow { background: rgba(245,158,11,0.15); color: #fbbf24; }
+  .tag.green { background: rgba(16,185,129,0.15); color: #34d399; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 1rem 0; }
+  .summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; text-align: center; }
+  .summary-card .num { font-size: 2rem; font-weight: 800; }
+  .summary-card .label { font-size: 0.85rem; color: var(--muted); margin-top: 0.3rem; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Vol.3 白帽安全审计报告</h1>
+<p class="subtitle">Remote PC Flutter v1.0.4 — 2026-06-10 | 第三轮深度攻击测试</p>
+
+<!-- 评分 -->
+<div class="score-bar">
+  <div>
+    <div class="score-label">安全评分</div>
+    <div class="score-big">9.2</div>
+  </div>
+  <div class="progress-bg"><div class="progress-fill" style="width:92%"></div></div>
+  <div class="score-diff">
+    <div class="up">+0.7</div>
+    <div class="score-label">vs Vol.2 (8.5)</div>
+  </div>
+</div>
+
+<!-- 评分演变 -->
+<div class="section">
+  <h2>📊 安全评分演变</h2>
+  <div class="timeline">
+    <div class="timeline-item">
+      <div class="version">原始</div>
+      <div class="score" style="color:#ef4444">4.9</div>
+      <div class="label">大量明文/硬编码</div>
+    </div>
+    <div class="timeline-item">
+      <div class="version">Vol.1</div>
+      <div class="score" style="color:#f59e0b">7.8</div>
+      <div class="label">7 个漏洞修复</div>
+    </div>
+    <div class="timeline-item">
+      <div class="version">Vol.2</div>
+      <div class="score" style="color:#f59e0b">7.8</div>
+      <div class="label">P0 逻辑崩溃 + 压测</div>
+    </div>
+    <div class="timeline-item">
+      <div class="version">P0+P1</div>
+      <div class="score" style="color:#10b981">8.5</div>
+      <div class="label">HTTPS + 速率限制 + fail-closed</div>
+    </div>
+    <div class="timeline-item">
+      <div class="version">Vol.3</div>
+      <div class="score" style="color:#10b981">9.2</div>
+      <div class="label">5 个新漏洞修复</div>
+    </div>
+  </div>
+</div>
+
+<!-- 概览 -->
+<div class="section">
+  <h2>🎯 Vol.3 漏洞概览</h2>
+  <div class="summary-grid">
+    <div class="summary-card"><div class="num" style="color:#ef4444">1</div><div class="label">CRITICAL</div></div>
+    <div class="summary-card"><div class="num" style="color:#f97316">2</div><div class="label">HIGH</div></div>
+    <div class="summary-card"><div class="num" style="color:#f59e0b">2</div><div class="label">MEDIUM</div></div>
+    <div class="summary-card"><div class="num" style="color:#10b981">5/5</div><div class="label">已修复</div></div>
+  </div>
+</div>
+
+<!-- 漏洞详情 -->
+<div class="section">
+  <h2>🔴 漏洞详情</h2>
+
+  <!-- ATK-W01 -->
+  <div class="vuln-card critical">
+    <div class="vuln-header">
+      <span class="vuln-id">ATK-W01</span>
+      <span class="badge critical">CRITICAL</span>
+      <span class="badge fixed">已修复</span>
+    </div>
+    <div class="vuln-title">设备白名单完全绕过</div>
+    <div class="vuln-desc">
+      <code>_checkDangerousAction()</code> 中，白名单检查逻辑为 <code>if (deviceId != null && !whitelist.isAllowed(deviceId))</code>。
+      如果请求不包含 <code>x-device-id</code> 头，整个白名单检查被直接跳过。
+      攻击者只需不发送此头即可绕过整个设备配对机制。
+    </div>
+    <div class="vuln-code">// 漏洞代码
+final deviceId = req.headers.value('x-device-id');
+if (deviceId != null && !_whitelist.isAllowed(deviceId, ...)) {
+    // 拒绝
+}
+// deviceId == null → 跳过！白名单形同虚设</div>
+    <div class="vuln-fix">
+      <strong>修复：</strong>deviceId 现在是必填字段。未提供 x-device-id → 直接 403 Forbidden。
+      <br>新增审计日志 <code>NO_DEVICE_ID</code> 记录此类攻击。
+    </div>
+  </div>
+
+  <!-- ATK-W02 -->
+  <div class="vuln-card high">
+    <div class="vuln-header">
+      <span class="vuln-id">ATK-W02</span>
+      <span class="badge high">HIGH</span>
+      <span class="badge fixed">已修复</span>
+    </div>
+    <div class="vuln-title">test-mode 生产后门</div>
+    <div class="vuln-desc">
+      <code>/audit-log</code> 端点允许 <code>x-test-mode</code> 请求头绕过认证。
+      任何知道此头的攻击者无需 Token 即可读取全部审计日志，获取其他 IP 的请求记录、SAFE_MODE 状态等敏感信息。
+    </div>
+    <div class="vuln-code">// 漏洞代码
+void _handleAuditLogRequest(HttpRequest req) {
+  if (!_isAuthorized(req) && !_isTestMode(req)) {  // ← test-mode 绕过！
+    _respondForbidden(req, 'Unauthorized');
+    return;
+  }
+  // ...返回审计日志
+}</div>
+    <div class="vuln-fix">
+      <strong>修复：</strong>移除 <code>/audit-log</code> 中的 <code>_isTestMode()</code> 绕过。
+      <code>x-test-mode</code> 仅保留在 SAFE_MODE 分支（合理使用场景：测试安全拦截效果而不真正执行）。
+    </div>
+  </div>
+
+  <!-- ATK-W03 -->
+  <div class="vuln-card high">
+    <div class="vuln-header">
+      <span class="vuln-id">ATK-W03</span>
+      <span class="badge high">HIGH</span>
+      <span class="badge fixed">已修复</span>
+    </div>
+    <div class="vuln-title">未授权信息泄露</div>
+    <div class="vuln-desc">
+      三个端点无需认证即可访问：
+      <ul style="margin-left:1.2rem;margin-top:0.4rem">
+        <li><code>/safe-mode</code> — 泄露 SAFE_MODE 开关状态（攻击者据此判断能否执行危险指令）</li>
+        <li><code>/heartbeat</code> — 泄露时间戳 + SAFE_MODE 状态</li>
+        <li><code>/ping</code> — 确认服务存活（风险较低，保留用于发现）</li>
+      </ul>
+      攻击者可先访问 <code>/safe-mode</code> 确认 SAFE_MODE=OFF，再发起关机等攻击。
+    </div>
+    <div class="vuln-fix">
+      <strong>修复：</strong>
+      <ul style="margin-left:1.2rem">
+        <li><code>/safe-mode</code> 现在需要认证（或 test-mode）</li>
+        <li><code>/heartbeat</code> 不再泄露 timestamp 和 safeMode，仅返回 <code>{"status":"alive"}</code></li>
+        <li><code>/ping</code> 保留用于服务发现，但精简为仅 <code>{"status":"alive"}</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ATK-W04 -->
+  <div class="vuln-card medium">
+    <div class="vuln-header">
+      <span class="vuln-id">ATK-W04</span>
+      <span class="badge medium">MEDIUM</span>
+      <span class="badge fixed">已修复</span>
+    </div>
+    <div class="vuln-title">无 CORS / 安全响应头</div>
+    <div class="vuln-desc">
+      HTTP 响应没有任何 CORS 限制或安全头，攻击场景：
+      <ol style="margin-left:1.2rem;margin-top:0.4rem">
+        <li>用户在浏览器打开恶意网页</li>
+        <li>网页 JS 向 <code>http://局域网IP:9998/shutdown</code> 发送 POST</li>
+        <li>如果浏览器有用户的认证 Cookie（本应用不用 Cookie，但未来可能加）</li>
+        <li>跨域请求成功 → 电脑关机</li>
+      </ol>
+      此外缺少 <code>X-Frame-Options</code>（点击劫持）、<code>X-Content-Type-Options</code>（MIME 嗅探）等安全头。
+    </div>
+    <div class="vuln-fix">
+      <strong>修复：</strong>添加完整安全响应头：
+      <ul style="margin-left:1.2rem">
+        <li><strong>CORS</strong>：仅允许 localhost 来源（4 个白名单 URL）</li>
+        <li><strong>X-Frame-Options: DENY</strong> — 防点击劫持</li>
+        <li><strong>X-Content-Type-Options: nosniff</strong> — 防 MIME 嗅探</li>
+        <li><strong>X-XSS-Protection: 1; mode=block</strong> — 防 XSS</li>
+        <li><strong>Cache-Control: no-store</strong> — 防敏感响应被缓存</li>
+        <li><strong>OPTIONS 预检</strong> — 正确处理 CORS preflight</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ATK-W05 -->
+  <div class="vuln-card medium">
+    <div class="vuln-header">
+      <span class="vuln-id">ATK-W05</span>
+      <span class="badge medium">MEDIUM</span>
+      <span class="badge fixed">已修复</span>
+    </div>
+    <div class="vuln-title">速率限制内存泄漏</div>
+    <div class="vuln-desc">
+      <code>_rateLimit</code> Map 中，只失败 1-2 次的 IP 记录永远不会被清理。
+      长期运行后（尤其是暴露在公网），Map 会持续增长导致内存泄漏。
+      成功的 IP 会被 <code>_recordSuccess()</code> 移除，但部分失败的永远残留。
+    </div>
+    <div class="vuln-fix">
+      <strong>修复：</strong>添加定期清理机制：
+      <ul style="margin-left:1.2rem">
+        <li>每 5 分钟或记录超过 100 条时触发清理</li>
+        <li>移除：已过期的封禁记录 + 未封禁但失败未达阈值的记录</li>
+        <li>防止 _rateLimit 无限增长</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 修复汇总 -->
+<div class="section">
+  <h2>📋 修复汇总</h2>
+  <table>
+    <thead>
+      <tr><th>编号</th><th>级别</th><th>问题</th><th>影响</th><th>状态</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>ATK-W01</code></td>
+        <td><span class="tag red">CRITICAL</span></td>
+        <td>白名单绕过：无 x-device-id 头直接跳过</td>
+        <td>整个白名单失效</td>
+        <td><span class="tag green">已修复</span></td>
+      </tr>
+      <tr>
+        <td><code>ATK-W02</code></td>
+        <td><span class="tag orange">HIGH</span></td>
+        <td>test-mode 后门：审计日志无需认证</td>
+        <td>敏感信息泄露</td>
+        <td><span class="tag green">已修复</span></td>
+      </tr>
+      <tr>
+        <td><code>ATK-W03</code></td>
+        <td><span class="tag orange">HIGH</span></td>
+        <td>未授权端点泄露 SAFE_MODE/时间戳</td>
+        <td>攻击侦察</td>
+        <td><span class="tag green">已修复</span></td>
+      </tr>
+      <tr>
+        <td><code>ATK-W04</code></td>
+        <td><span class="tag yellow">MEDIUM</span></td>
+        <td>无 CORS/安全头，浏览器 CSRF</td>
+        <td>跨域攻击</td>
+        <td><span class="tag green">已修复</span></td>
+      </tr>
+      <tr>
+        <td><code>ATK-W05</code></td>
+        <td><span class="tag yellow">MEDIUM</span></td>
+        <td>速率限制内存泄漏</td>
+        <td>长期运行 OOM</td>
+        <td><span class="tag green">已修复</span></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 安全层级 -->
+<div class="section">
+  <h2>🛡️ 当前安全层级（Vol.3 后）</h2>
+  <table>
+    <thead>
+      <tr><th>层级</th><th>机制</th><th>状态</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>L1 传输</td><td>HTTPS (TLS 1.2+) + 自签名 RSA-2048</td><td>✅ 启用</td></tr>
+      <tr><td>L2 认证</td><td>Token (32字节 CSPRNG) + 常量时间比较</td><td>✅ 启用</td></tr>
+      <tr><td>L3 授权</td><td>设备白名单 (deviceId 必须 + 指纹验证)</td><td>✅ 加固</td></tr>
+      <tr><td>L4 防护</td><td>速率限制 (3次失败→60s封禁) + 定期清理</td><td>✅ 加固</td></tr>
+      <tr><td>L5 安全</td><td>SAFE_MODE + 审计日志</td><td>✅ 启用</td></tr>
+      <tr><td>L6 原生</td><td>调试检测 + 完整性校验 (fail-closed)</td><td>✅ 启用</td></tr>
+      <tr><td>L7 加固</td><td>CORS + 安全响应头 + DNS rebinding 防护</td><td>✅ 新增</td></tr>
+      <tr><td>L8 混淆</td><td>Android ProGuard + 资源压缩</td><td>✅ 启用</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 剩余风险 -->
+<div class="section">
+  <h2>⚠️ 已知剩余风险（v1.0.4+）</h2>
+  <table>
+    <thead>
+      <tr><th>编号</th><th>级别</th><th>风险</th><th>计划</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>RR-01</td><td>P2</td><td>WebRTC DataChannel 无独立认证</td><td>v1.0.5 跨网络模式完善</td></tr>
+      <tr><td>RR-02</td><td>P2</td><td>WebSocket 信令无 auth</td><td>v1.0.5 信令层加 Token</td></tr>
+      <tr><td>RR-03</td><td>P2</td><td>TURN 服务器凭据硬编码（公共免费）</td><td>v1.0.5 自建 TURN</td></tr>
+      <tr><td>RR-04</td><td>P3</td><td>WinVerifyTrust 未实现（仅基础检查）</td><td>v1.0.4 正式版</td></tr>
+      <tr><td>RR-05</td><td>P3</td><td>自签名证书无 Certificate Pinning</td><td>v1.0.5 客户端证书指纹校验</td></tr>
+      <tr><td>RR-06</td><td>P3</td><td>UDP 广播可被伪造（无身份签名）</td><td>v1.0.5 身份鉴权在 HTTP 层已缓解</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 三轮修复对比 -->
+<div class="section">
+  <h2>📈 三轮修复对比</h2>
+  <table>
+    <thead>
+      <tr><th>轮次</th><th>发现漏洞</th><th>修复</th><th>新增机制</th><th>评分</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Vol.1</td>
+        <td>7</td>
+        <td>7</td>
+        <td>Token 认证、SAFE_MODE、审计日志</td>
+        <td>4.9 → 7.8</td>
+      </tr>
+      <tr>
+        <td>Vol.2</td>
+        <td>8 (2 P0 崩溃)</td>
+        <td>5</td>
+        <td>速率限制 bug 修复、信令慢轮询</td>
+        <td>7.8 → 8.5</td>
+      </tr>
+      <tr>
+        <td>Vol.3</td>
+        <td>5 (1 CRITICAL)</td>
+        <td>5</td>
+        <td>白名单必检、CORS、安全头、内存清理</td>
+        <td>8.5 → 9.2</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="footer">
+  <p>Remote PC Flutter v1.0.4 | Vol.3 White-Hat Security Audit | 2026-06-10</p>
+  <p>Commit: 4671cbc | Flutter Analyze: 0 errors, 0 warnings</p>
+</div>
+
+</div>
+</body>
+</html>

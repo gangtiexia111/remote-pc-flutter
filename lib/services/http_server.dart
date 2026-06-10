@@ -30,7 +30,15 @@ class HttpServerService {
 
   /// 速率限制阈值
   static const int _maxFailures = 3;
-  static const int _blockDurationMs = 60 * 1000;
+
+  /// 递增封禁时长（ATK-W09 修复：不再固定 60s，而是递增）
+  /// 第 1 次封禁: 60s, 第 2 次: 5min, 第 3 次: 30min, 第 4 次+: 1h
+  static const List<int> _blockDurationsMs = [
+    60 * 1000, // 1 min
+    5 * 60 * 1000, // 5 min
+    30 * 60 * 1000, // 30 min
+    60 * 60 * 1000, // 1 hour
+  ];
 
   /// 速率限制清理阈值（超过此数量触发清理）
   static const int _rateLimitCleanupThreshold = 100;
@@ -40,6 +48,18 @@ class HttpServerService {
 
   /// 速率限制清理间隔（5分钟）
   static const int _rateLimitCleanupIntervalMs = 5 * 60 * 1000;
+
+  /// 最大请求体大小（10KB，防止 OOM 攻击 ATK-W08）
+  static const int _maxRequestBodySize = 10 * 1024;
+
+  /// 全局请求频率限制：IP → 最后请求时间戳
+  final Map<String, int> _lastRequestTime = {};
+
+  /// 全局请求频率限制：同一 IP 每秒最多请求数
+  static const int _maxRequestsPerSecond = 10;
+
+  /// 全局请求最小间隔（ms）
+  static const int _minRequestIntervalMs = 100;
 
   HttpServer? _server;
   bool _running = false;
@@ -100,8 +120,8 @@ class HttpServerService {
     _server = await _bindServer(port, useTls, finalCert, finalKey);
 
     final scheme = useTls ? 'HTTPS' : 'HTTP';
-    print('[$scheme] Server started on port $port '
-        '(auth token: ${_authToken!.substring(0, 8)}..., TLS: $useTls)');
+    print('[$scheme] Server started on port $port (TLS: $useTls)');
+    // 注意：不再输出 auth token 任何部分（ATK-W07 修复）
 
     await for (final req in _server!) {
       _handleRequest(req);
@@ -149,6 +169,9 @@ class HttpServerService {
     // ── 速率限制检查（放在最前面）───────────────────
     final blocked = _checkRateLimit(clientIp, req);
     if (blocked) return;
+
+    // ── 全局请求频率限制（防泛洪 ATK-W09）───────────
+    if (!_checkGlobalRateLimit(clientIp, req)) return;
 
     final path = req.uri.path;
     print('[HTTP] ${req.method} $path from $clientIp');
@@ -287,19 +310,49 @@ class HttpServerService {
     return false;
   }
 
-  /// 记录一次失败，超过阈值则封禁
+  /// 记录一次失败，超过阈值则封禁（递增封禁时长 ATK-W09）
   void _recordFailure(String ip) {
-    final entry = _rateLimit.putIfAbsent(ip, () => RateEntry(0, 0));
+    final entry = _rateLimit.putIfAbsent(ip, () => RateEntry(0, 0, 0));
     entry.failures++;
     if (entry.failures >= _maxFailures) {
-      entry.blockedUntil = DateTime.now().millisecondsSinceEpoch + _blockDurationMs;
-      print('[HTTP] 🔴 IP $ip BLOCKED for 60s (failures: ${entry.failures})');
+      // 递增封禁：封禁次数越多，封得越久
+      final blockIndex =
+          entry.blockCount < _blockDurationsMs.length ? entry.blockCount : _blockDurationsMs.length - 1;
+      final duration = _blockDurationsMs[blockIndex];
+      entry.blockedUntil = DateTime.now().millisecondsSinceEpoch + duration;
+      entry.blockCount++;
+      print('[HTTP] 🔴 IP $ip BLOCKED for ${duration ~/ 1000}s '
+          '(failures: ${entry.failures}, block #${entry.blockCount})');
     }
   }
 
   /// 记录一次成功，清除该 IP 的限制记录
   void _recordSuccess(String ip) {
     _rateLimit.remove(ip);
+  }
+
+  /// 全局请求频率限制（防泛洪 ATK-W09）
+  bool _checkGlobalRateLimit(String ip, HttpRequest req) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final lastTime = _lastRequestTime[ip] ?? 0;
+    if (now - lastTime < _minRequestIntervalMs) {
+      req.response
+        ..statusCode = 429
+        ..headers.contentType = ContentType.json
+        ..write(jsonEncode({
+          'error': 'too_many_requests',
+          'message': 'Request rate limit exceeded',
+        }))
+        ..close();
+      return false;
+    }
+    _lastRequestTime[ip] = now;
+
+    // 定期清理全局频率限制记录
+    if (_lastRequestTime.length > _rateLimitCleanupThreshold) {
+      _lastRequestTime.removeWhere((key, ts) => now - ts > 60000);
+    }
+    return true;
   }
 
   // ── 授权 & SAFE_MODE 检查 ────────────────────────
@@ -315,9 +368,21 @@ class HttpServerService {
     return false;
   }
 
-  /// 常量时间字符串比较（防时序攻击）
+  /// 常量时间字符串比较（防时序攻击 + 长度侧信道 ATK-W10）
   bool _constantTimeEqual(String a, String b) {
-    if (a.length != b.length) return false;
+    // 不提前返回 false（即使长度不同也完整比较，防长度泄露）
+    if (a.length != b.length) {
+      // 仍需遍历较长字符串的长度，防止通过执行时间推断长度
+      final maxLen = a.length > b.length ? a.length : b.length;
+      // ignore: unused_local_variable
+      int dummy = 1;
+      for (int i = 0; i < maxLen; i++) {
+        final ac = i < a.length ? a.codeUnitAt(i) : 0;
+        final bc = i < b.length ? b.codeUnitAt(i) : 0;
+        dummy |= ac ^ bc;
+      }
+      return false; // 长度不同 → 一定不相等
+    }
     int result = 0;
     for (int i = 0; i < a.length; i++) {
       result |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
@@ -339,6 +404,13 @@ class HttpServerService {
       // 未提供 deviceId → 拒绝（修复白名单绕过漏洞 ATK-W01）
       _addAuditLog(action, 'NO_DEVICE_ID', clientIp);
       _respondForbidden(req, 'Device ID required. Provide x-device-id header.');
+      return false;
+    }
+    if (fingerprint == null || fingerprint.isEmpty) {
+      // 未提供 fingerprint → 拒绝（修复指纹绕过漏洞 ATK-W06）
+      _addAuditLog(action, 'NO_FINGERPRINT', clientIp);
+      _respondForbidden(req,
+          'Device fingerprint required. Provide x-device-fingerprint header.');
       return false;
     }
     if (!_whitelist.isAllowed(deviceId, fingerprint: fingerprint)) {
@@ -376,10 +448,13 @@ class HttpServerService {
   }
 
   void _addAuditLog(String action, String result, String clientIp) {
+    // 输入消毒：截断过长值（防日志注入 ATK-W10）
+    final safeAction = action.length > 64 ? action.substring(0, 64) : action;
+    final safeClientIp = clientIp.length > 45 ? clientIp.substring(0, 45) : clientIp;
     _auditLog.add({
-      'action': action,
+      'action': safeAction,
       'result': result,
-      'clientIp': clientIp,
+      'clientIp': safeClientIp,
       'safeMode': _safeMode,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     });
@@ -508,6 +583,26 @@ class HttpServerService {
 
   // ── 响应工具 ──────────────────────────────────────
 
+  /// 安全读取请求体（带大小限制，防 OOM 攻击 ATK-W08）
+  Future<String?> _readBodySafe(HttpRequest req) async {
+    try {
+      final contentLength = req.contentLength;
+      if (contentLength > _maxRequestBodySize) {
+        _respondForbidden(req, 'Request body too large (max ${_maxRequestBodySize ~/ 1024}KB)');
+        return null;
+      }
+      final body = await utf8.decoder.bind(req).first;
+      if (body.length > _maxRequestBodySize) {
+        _respondForbidden(req, 'Request body too large (max ${_maxRequestBodySize ~/ 1024}KB)');
+        return null;
+      }
+      return body;
+    } catch (e) {
+      _respondForbidden(req, 'Invalid request body');
+      return null;
+    }
+  }
+
   void _respondOk(HttpRequest req, Map<String, dynamic> body) {
     req.response
       ..statusCode = 200
@@ -569,7 +664,8 @@ class HttpServerService {
     }
 
     try {
-      final body = await utf8.decoder.bind(req).first;
+      final body = await _readBodySafe(req);
+      if (body == null) return;
       final data = jsonDecode(body) as Map<String, dynamic>;
       final deviceId = data['deviceId'] as String? ?? '';
       final fingerprint = data['fingerprint'] as String? ?? '';
@@ -577,6 +673,13 @@ class HttpServerService {
 
       if (deviceId.isEmpty) {
         _respondForbidden(req, 'deviceId is required');
+        return;
+      }
+
+      // 输入验证：限制字段长度（防注入 ATK-W10）
+      if (deviceId.length > 64 || name.length > 128 || fingerprint.length > 256) {
+        _addAuditLog('PAIR', 'INVALID_INPUT', clientIp);
+        _respondForbidden(req, 'Input too long');
         return;
       }
 
@@ -593,7 +696,8 @@ class HttpServerService {
       });
     } catch (e) {
       _addAuditLog('PAIR', 'ERROR', clientIp);
-      _respondForbidden(req, 'Invalid pairing data: $e');
+      // 不泄露内部错误细节（ATK-W10 修复）
+      _respondForbidden(req, 'Invalid pairing data');
     }
   }
 
@@ -605,12 +709,19 @@ class HttpServerService {
     }
 
     try {
-      final body = await utf8.decoder.bind(req).first;
+      final body = await _readBodySafe(req);
+      if (body == null) return;
       final data = jsonDecode(body) as Map<String, dynamic>;
       final deviceId = data['deviceId'] as String? ?? '';
 
       if (deviceId.isEmpty) {
         _respondForbidden(req, 'deviceId is required');
+        return;
+      }
+
+      // 输入验证：限制字段长度（防注入 ATK-W10）
+      if (deviceId.length > 64) {
+        _respondForbidden(req, 'Input too long');
         return;
       }
 
@@ -622,7 +733,8 @@ class HttpServerService {
         'totalDevices': _whitelist.count,
       });
     } catch (e) {
-      _respondForbidden(req, 'Invalid unpair data: $e');
+      // 不泄露内部错误细节（ATK-W10 修复）
+      _respondForbidden(req, 'Invalid unpair data');
     }
   }
 
@@ -648,5 +760,6 @@ class HttpServerService {
 class RateEntry {
   int failures;
   int blockedUntil; // millisecondsSinceEpoch，0 表示未封禁
-  RateEntry(this.failures, this.blockedUntil);
+  int blockCount; // 累计被封禁次数（用于递增封禁时长 ATK-W09）
+  RateEntry(this.failures, this.blockedUntil, this.blockCount);
 }

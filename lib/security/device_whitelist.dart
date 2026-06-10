@@ -53,17 +53,33 @@ class DeviceWhitelist {
 
   /// 检查设备是否在白名单中
   /// 同时验证设备 ID + 指纹（防止单纯伪造设备 ID）
+  ///
+  /// 安全策略（ATK-W06 修复）：
+  /// - 如果白名单中该设备有指纹，则请求必须提供匹配的指纹
+  /// - 如果白名单中该设备没有指纹（空字符串），则只验证 deviceId
+  /// - fingerprint 参数为必填，与白名单记录匹配才算通过
   bool isAllowed(String deviceId, {String? fingerprint}) {
     for (final d in _devices) {
       if (d[kDeviceId] == deviceId) {
-        // 如果白名单中有指纹，也要验证
-        if (fingerprint != null && d.containsKey(kFingerprint)) {
-          return d[kFingerprint] == fingerprint;
-        }
-        return true;
+        final storedFingerprint = d[kFingerprint] as String? ?? '';
+        // 白名单中该设备没有指纹 → 仅 deviceId 匹配即可
+        if (storedFingerprint.isEmpty) return true;
+        // 白名单中有指纹 → 请求必须提供且匹配
+        if (fingerprint == null || fingerprint.isEmpty) return false;
+        return _constantTimeEqual(fingerprint, storedFingerprint);
       }
     }
     return false;
+  }
+
+  /// 常量时间字符串比较（防时序攻击）
+  bool _constantTimeEqual(String a, String b) {
+    if (a.length != b.length) return false;
+    int result = 0;
+    for (int i = 0; i < a.length; i++) {
+      result |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+    }
+    return result == 0;
   }
 
   /// 添加设备到白名单（配对成功后调用）

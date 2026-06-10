@@ -55,6 +55,18 @@ class SignalingClient {
     required this.callbacks,
   });
 
+  /// 确保使用 wss://（ATK-W11 修复：信令必须加密传输）
+  String _ensureSecureUrl(String url) {
+    if (url.startsWith('ws://') && !url.startsWith('ws://localhost') &&
+        !url.startsWith('ws://127.0.0.1')) {
+      // 非本地连接必须使用 wss://
+      final secureUrl = url.replaceFirst('ws://', 'wss://');
+      print('[Signaling] ⚠️ Upgraded ws:// to wss:// for security');
+      return secureUrl;
+    }
+    return url;
+  }
+
   /// 连接到信令服务器
   void connect() {
     _shouldReconnect = true;
@@ -63,8 +75,9 @@ class SignalingClient {
 
   void _doConnect() {
     try {
-      print('[Signaling] Connecting to $serverUrl');
-      _channel = WebSocketChannel.connect(Uri.parse(serverUrl));
+      final secureUrl = _ensureSecureUrl(serverUrl);
+      print('[Signaling] Connecting to $secureUrl');
+      _channel = WebSocketChannel.connect(Uri.parse(secureUrl));
       _connected = true;
       _reconnectAttempts = 0;
 
